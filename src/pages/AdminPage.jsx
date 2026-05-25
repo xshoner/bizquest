@@ -745,17 +745,45 @@ export default function AdminPage() {
       `한 줄 표현: ${team.idea?.tagline || "-"}`
     ].join("\n");
 
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(apiKey.trim() || appSettings.geminiApiKey)}`, {
+    const requestBody = {
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { responseMimeType: "application/json", temperature: 0.25 }
+    };
+    const activeKey = String(apiKey || appSettings.geminiApiKey || "").trim();
+    const useProxyFirst = !["localhost", "127.0.0.1"].includes(window.location.hostname);
+    const response = useProxyFirst
+      ? await requestGeminiViaProxy(requestBody, activeKey)
+      : await requestGeminiDirect(requestBody, activeKey);
+    if (!response.ok && useProxyFirst && [404, 405, 501].includes(response.status)) {
+      return parseGeminiResponse(await requestGeminiDirect(requestBody, activeKey));
+    }
+    return parseGeminiResponse(response);
+  }
+
+  async function requestGeminiDirect(requestBody, apiKey) {
+    return fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { responseMimeType: "application/json", temperature: 0.25 }
-      })
+      body: JSON.stringify(requestBody)
     });
+  }
+
+  async function requestGeminiViaProxy(requestBody, apiKey) {
+    return fetch("/api/gemini", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ requestBody, apiKey })
+    });
+  }
+
+  async function parseGeminiResponse(response) {
     if (!response.ok) {
       const errorText = await response.text().catch(() => "");
-      throw new Error(`Gemini 응답 오류 ${response.status}${errorText ? `: ${errorText.slice(0, 180)}` : ""}`);
+      const deployedHost = window.location.host;
+      const hint = response.status === 403
+        ? ` 배포 도메인(${deployedHost})에서 Gemini 키가 거부되었습니다. /api/gemini 서버리스 함수의 GEMINI_API_KEY 환경변수 또는 Google Cloud API 키 허용 도메인을 확인하세요.`
+        : "";
+      throw new Error(`Gemini 응답 오류 ${response.status}.${hint}${errorText ? ` ${errorText.slice(0, 220)}` : ""}`);
     }
     const payload = await response.json();
     const text = payload.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
