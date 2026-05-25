@@ -565,7 +565,7 @@ export default function AdminPage() {
       const evaluations = {};
       for (const [teamKey, team] of activeTeamEntries) {
         try {
-          evaluations[teamKey] = await requestAiEvaluation(team, appSettings.geminiApiKey);
+          evaluations[teamKey] = await requestAiEvaluation(team);
         } catch (err) {
           evaluations[teamKey] = makeFallbackAiEvaluation(team, err);
         }
@@ -724,7 +724,7 @@ export default function AdminPage() {
     await setDoc(doc(db, "rooms", roomId), makeInitialRoom(roomId, room?.roomTitle || appSettings.defaultRoomTitle || "스타트업 히어로"));
   }
 
-  async function requestAiEvaluation(team, apiKey = appSettings.geminiApiKey) {
+  async function requestAiEvaluation(team) {
     const prompt = [
       "너는 청소년 창업 평가 위원이야.",
       "아래 사업계획을 14가지 팩터(F01~F14)에 대해 각각 '양호', '보통', '취약' 중 하나로 판정해.",
@@ -749,30 +749,15 @@ export default function AdminPage() {
       contents: [{ parts: [{ text: prompt }] }],
       generationConfig: { responseMimeType: "application/json", temperature: 0.25 }
     };
-    const activeKey = String(apiKey || appSettings.geminiApiKey || "").trim();
-    const useProxyFirst = !["localhost", "127.0.0.1"].includes(window.location.hostname);
-    const response = useProxyFirst
-      ? await requestGeminiViaProxy(requestBody, activeKey)
-      : await requestGeminiDirect(requestBody, activeKey);
-    if (!response.ok && useProxyFirst && [404, 405, 501].includes(response.status)) {
-      return parseGeminiResponse(await requestGeminiDirect(requestBody, activeKey));
-    }
+    const response = await requestGeminiViaProxy(requestBody);
     return parseGeminiResponse(response);
   }
 
-  async function requestGeminiDirect(requestBody, apiKey) {
-    return fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(requestBody)
-    });
-  }
-
-  async function requestGeminiViaProxy(requestBody, apiKey) {
+  async function requestGeminiViaProxy(requestBody) {
     return fetch("/api/gemini", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ requestBody, apiKey })
+      body: JSON.stringify({ requestBody })
     });
   }
 
@@ -781,7 +766,7 @@ export default function AdminPage() {
       const errorText = await response.text().catch(() => "");
       const deployedHost = window.location.host;
       const hint = response.status === 403
-        ? ` 배포 도메인(${deployedHost})에서 Gemini 키가 거부되었습니다. /api/gemini 서버리스 함수의 GEMINI_API_KEY 환경변수 또는 Google Cloud API 키 허용 도메인을 확인하세요.`
+        ? ` 배포 도메인(${deployedHost})의 /api/gemini 함수에서 GEMINI_API_KEY가 거부되었습니다. 서버 환경변수의 키 제한을 확인하세요.`
         : "";
       throw new Error(`Gemini 응답 오류 ${response.status}.${hint}${errorText ? ` ${errorText.slice(0, 220)}` : ""}`);
     }

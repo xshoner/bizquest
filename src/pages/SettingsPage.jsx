@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { AlertTriangle, KeyRound, RotateCcw, Save, Settings, Trash2 } from "lucide-react";
 import { collection, db, doc, getDocs, setDoc, writeBatch } from "../firebase.js";
@@ -58,11 +58,6 @@ export default function SettingsPage() {
     setFaqText(valueItemsToText(nextSettings.landing.faqs));
   }, [settings]);
 
-  const maskedGeminiKey = useMemo(() => {
-    if (!form.geminiApiKey) return "등록된 키 없음";
-    return `${form.geminiApiKey.slice(0, 8)}...${form.geminiApiKey.slice(-6)}`;
-  }, [form.geminiApiKey]);
-
   function updateField(key, value) {
     setForm((current) => ({ ...current, [key]: value }));
   }
@@ -108,6 +103,7 @@ export default function SettingsPage() {
         ...payload,
         updatedAt: Date.now()
       }));
+      delete cleanPayload.geminiApiKey;
       localStorage.setItem(LOCAL_APP_SETTINGS_KEY, JSON.stringify(cleanPayload));
       await setDoc(doc(db, ...APP_SETTINGS_PATH), cleanPayload);
       setForm(cleanPayload);
@@ -216,10 +212,8 @@ export default function SettingsPage() {
 
       <div className="settings-grid">
         <section className="settings-panel">
-          <h2><KeyRound size={20} /> API 및 관리자</h2>
-          <label>Gemini API Key</label>
-          <input value={form.geminiApiKey || ""} onChange={(event) => updateField("geminiApiKey", event.target.value)} placeholder="Gemini API Key" />
-          <p className="settings-help">현재 키: {maskedGeminiKey}</p>
+          <h2><KeyRound size={20} /> 관리자 및 접속</h2>
+          <p className="settings-help">Gemini API 키는 보안상 이 화면에서 관리하지 않습니다. 배포 환경변수 `GEMINI_API_KEY`로만 설정하세요.</p>
 
           <label>관리자 비밀번호</label>
           <input value={form.adminPasscode || ""} onChange={(event) => updateField("adminPasscode", event.target.value)} placeholder="관리자 비밀번호" />

@@ -3,7 +3,6 @@ import { auth, db, doc, onSnapshot, signInAnonymously } from "../firebase.js";
 
 export const DEFAULT_APP_SETTINGS = {
   adminPasscode: "7476",
-  geminiApiKey: "AIzaSyCRu_qSe4hDKPohHrdmd9PH0HjQVKaB4nU",
   defaultRoomTitle: "스타트업 히어로",
   studentOriginHost: "192.168.0.190",
   landing: {
@@ -84,7 +83,10 @@ function readLocalAppSettings() {
   if (typeof window === "undefined") return null;
   try {
     const cached = window.localStorage.getItem(LOCAL_APP_SETTINGS_KEY);
-    return cached ? JSON.parse(cached) : null;
+    if (!cached) return null;
+    const parsed = JSON.parse(cached);
+    delete parsed.geminiApiKey;
+    return parsed;
   } catch {
     return null;
   }
@@ -99,6 +101,8 @@ function newerSettings(primary, fallback) {
 }
 
 export function mergeAppSettings(settings = {}) {
+  const sanitizedSettings = { ...settings };
+  delete sanitizedSettings.geminiApiKey;
   const incomingLanding = settings.landing || {};
   const flowSteps = Array.isArray(incomingLanding.flowSteps)
     ? incomingLanding.flowSteps
@@ -109,7 +113,7 @@ export function mergeAppSettings(settings = {}) {
 
   return {
     ...DEFAULT_APP_SETTINGS,
-    ...settings,
+    ...sanitizedSettings,
     landing: {
       ...DEFAULT_APP_SETTINGS.landing,
       ...incomingLanding,

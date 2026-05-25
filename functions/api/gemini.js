@@ -1,7 +1,7 @@
 export async function onRequestPost({ request, env }) {
   try {
-    const { requestBody, apiKey } = await request.json();
-    const geminiApiKey = env.GEMINI_API_KEY || apiKey;
+    const { requestBody } = await request.json();
+    const geminiApiKey = env.GEMINI_API_KEY;
     if (!geminiApiKey) {
       return new Response("GEMINI_API_KEY environment variable is missing.", { status: 500 });
     }
@@ -12,7 +12,15 @@ export async function onRequestPost({ request, env }) {
       body: JSON.stringify(requestBody)
     });
 
-    return new Response(await response.text(), {
+    const responseText = await response.text();
+    if (response.status === 403) {
+      return new Response(
+        `Gemini API key was rejected with 403. Use a server-side Gemini key in GEMINI_API_KEY with API restrictions for Generative Language API only, and no HTTP referrer website restriction. Original response: ${responseText.slice(0, 500)}`,
+        { status: 403, headers: { "Content-Type": "text/plain; charset=utf-8" } }
+      );
+    }
+
+    return new Response(responseText, {
       status: response.status,
       headers: {
         "Content-Type": response.headers.get("Content-Type") || "application/json"
