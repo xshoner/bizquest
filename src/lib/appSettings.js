@@ -3,7 +3,7 @@ import { auth, db, doc, onSnapshot, signInAnonymously } from "../firebase.js";
 
 export const DEFAULT_APP_SETTINGS = {
   adminPasscode: "7476",
-  geminiApiKey: "AIzaSyCuH3WIkV6TdvtiMbmR9Nxa1B-o-vXiNzU",
+  geminiApiKey: "AIzaSyCRu_qSe4hDKPohHrdmd9PH0HjQVKaB4nU",
   defaultRoomTitle: "스타트업 히어로",
   studentOriginHost: "192.168.0.190",
   landing: {
