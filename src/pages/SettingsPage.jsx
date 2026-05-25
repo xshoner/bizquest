@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { AlertTriangle, KeyRound, RotateCcw, Save, Settings, Trash2 } from "lucide-react";
 import { collection, db, doc, getDocs, setDoc, writeBatch } from "../firebase.js";
-import { APP_SETTINGS_PATH, DEFAULT_APP_SETTINGS, mergeAppSettings, useAppSettings } from "../lib/appSettings.js";
+import { APP_SETTINGS_PATH, DEFAULT_APP_SETTINGS, LOCAL_APP_SETTINGS_KEY, mergeAppSettings, useAppSettings } from "../lib/appSettings.js";
 
 function linesToList(value) {
   return String(value || "")
@@ -37,6 +37,10 @@ export default function SettingsPage() {
   const [featureText, setFeatureText] = useState("");
   const [flowText, setFlowText] = useState("");
   const [valueText, setValueText] = useState("");
+  const [statText, setStatText] = useState("");
+  const [featureItemText, setFeatureItemText] = useState("");
+  const [useCaseText, setUseCaseText] = useState("");
+  const [faqText, setFaqText] = useState("");
   const [status, setStatus] = useState("");
   const [roomCount, setRoomCount] = useState(null);
   const [resetConfirm, setResetConfirm] = useState("");
@@ -48,6 +52,10 @@ export default function SettingsPage() {
     setFeatureText(listToLines(nextSettings.landing.featureButtons));
     setFlowText(listToLines(nextSettings.landing.flowSteps));
     setValueText(valueItemsToText(nextSettings.landing.valueItems));
+    setStatText(valueItemsToText(nextSettings.landing.statItems));
+    setFeatureItemText(valueItemsToText(nextSettings.landing.featureItems));
+    setUseCaseText((nextSettings.landing.useCases || []).map((item) => `${item.title} | ${item.description} | ${item.quote || ""}`).join("\n"));
+    setFaqText(valueItemsToText(nextSettings.landing.faqs));
   }, [settings]);
 
   const maskedGeminiKey = useMemo(() => {
@@ -86,10 +94,23 @@ export default function SettingsPage() {
           ...form.landing,
           featureButtons: linesToList(featureText),
           flowSteps: linesToList(flowText),
-          valueItems: textToValueItems(valueText)
+          valueItems: textToValueItems(valueText),
+          statItems: textToValueItems(statText),
+          featureItems: textToValueItems(featureItemText),
+          useCases: linesToList(useCaseText).map((line) => {
+            const [title, description, quote] = line.split("|").map((part) => part.trim());
+            return { title: title || "활용 사례", description: description || "", quote: quote || "" };
+          }),
+          faqs: textToValueItems(faqText)
         }
       });
-      await setDoc(doc(db, ...APP_SETTINGS_PATH), payload, { merge: true });
+      const cleanPayload = JSON.parse(JSON.stringify({
+        ...payload,
+        updatedAt: Date.now()
+      }));
+      localStorage.setItem(LOCAL_APP_SETTINGS_KEY, JSON.stringify(cleanPayload));
+      await setDoc(doc(db, ...APP_SETTINGS_PATH), cleanPayload);
+      setForm(cleanPayload);
       setStatus("설정을 저장했습니다. 메인 홈페이지와 AI 평가에 바로 반영됩니다.");
     } catch (err) {
       setStatus(err.message || "설정 저장에 실패했습니다.");
@@ -154,6 +175,10 @@ export default function SettingsPage() {
     setFeatureText(listToLines(DEFAULT_APP_SETTINGS.landing.featureButtons));
     setFlowText(listToLines(DEFAULT_APP_SETTINGS.landing.flowSteps));
     setValueText(valueItemsToText(DEFAULT_APP_SETTINGS.landing.valueItems));
+    setStatText(valueItemsToText(DEFAULT_APP_SETTINGS.landing.statItems));
+    setFeatureItemText(valueItemsToText(DEFAULT_APP_SETTINGS.landing.featureItems));
+    setUseCaseText(DEFAULT_APP_SETTINGS.landing.useCases.map((item) => `${item.title} | ${item.description} | ${item.quote || ""}`).join("\n"));
+    setFaqText(valueItemsToText(DEFAULT_APP_SETTINGS.landing.faqs));
   }
 
   if (loading) return <div className="settings-page">설정을 불러오는 중입니다.</div>;
@@ -211,6 +236,14 @@ export default function SettingsPage() {
           <h2><Settings size={20} /> 메인 홈페이지 텍스트</h2>
           <label>상단 이미지 대체 텍스트</label>
           <input value={form.landing.heroAlt || ""} onChange={(event) => updateLandingField("heroAlt", event.target.value)} />
+          <label>브랜드명</label>
+          <input value={form.landing.brandName || ""} onChange={(event) => updateLandingField("brandName", event.target.value)} />
+          <label>히어로 배지 문구</label>
+          <input value={form.landing.heroBadge || ""} onChange={(event) => updateLandingField("heroBadge", event.target.value)} />
+          <label>히어로 제목</label>
+          <input value={form.landing.heroTitle || ""} onChange={(event) => updateLandingField("heroTitle", event.target.value)} />
+          <label>히어로 설명</label>
+          <textarea value={form.landing.heroDescription || ""} onChange={(event) => updateLandingField("heroDescription", event.target.value)} rows={3} />
           <div className="settings-two-col">
             <div>
               <label>시작 버튼</label>
@@ -225,6 +258,14 @@ export default function SettingsPage() {
           <input value={form.landing.sectionEyebrow || ""} onChange={(event) => updateLandingField("sectionEyebrow", event.target.value)} />
           <label>섹션 제목</label>
           <input value={form.landing.sectionTitle || ""} onChange={(event) => updateLandingField("sectionTitle", event.target.value)} />
+          <label>소개 작은 문구</label>
+          <input value={form.landing.introEyebrow || ""} onChange={(event) => updateLandingField("introEyebrow", event.target.value)} />
+          <label>소개 제목</label>
+          <input value={form.landing.introTitle || ""} onChange={(event) => updateLandingField("introTitle", event.target.value)} />
+          <label>소개 강조 문구</label>
+          <input value={form.landing.introQuote || ""} onChange={(event) => updateLandingField("introQuote", event.target.value)} />
+          <label>소개 본문</label>
+          <textarea value={form.landing.introBody || ""} onChange={(event) => updateLandingField("introBody", event.target.value)} rows={4} />
           <div className="settings-two-col">
             <div>
               <label>교사용 카드 제목</label>
@@ -265,13 +306,51 @@ export default function SettingsPage() {
 
         <section className="settings-panel">
           <h2>홈페이지 목록 문구</h2>
+          <label>상단 지표 목록</label>
+          <textarea value={statText} onChange={(event) => setStatText(event.target.value)} rows={3} />
           <label>기능 버튼 목록</label>
           <textarea value={featureText} onChange={(event) => setFeatureText(event.target.value)} rows={5} />
           <label>수업 흐름 목록</label>
           <textarea value={flowText} onChange={(event) => setFlowText(event.target.value)} rows={7} />
           <label>가치 설명 목록</label>
           <textarea value={valueText} onChange={(event) => setValueText(event.target.value)} rows={8} />
-          <p className="settings-help">가치 설명은 `제목 | 설명` 형식으로 한 줄에 하나씩 입력합니다.</p>
+          <label>특장점 목록</label>
+          <textarea value={featureItemText} onChange={(event) => setFeatureItemText(event.target.value)} rows={7} />
+          <label>활용 사례 목록</label>
+          <textarea value={useCaseText} onChange={(event) => setUseCaseText(event.target.value)} rows={7} />
+          <label>FAQ 목록</label>
+          <textarea value={faqText} onChange={(event) => setFaqText(event.target.value)} rows={7} />
+          <p className="settings-help">지표/가치/특장점/FAQ는 `제목 | 설명`, 활용 사례는 `제목 | 설명 | 인용문` 형식입니다.</p>
+        </section>
+
+        <section className="settings-panel">
+          <h2>홈페이지 섹션 제목</h2>
+          <label>특장점 작은 문구</label>
+          <input value={form.landing.featureEyebrow || ""} onChange={(event) => updateLandingField("featureEyebrow", event.target.value)} />
+          <label>특장점 제목</label>
+          <input value={form.landing.featureTitle || ""} onChange={(event) => updateLandingField("featureTitle", event.target.value)} />
+          <label>이용 방법 작은 문구</label>
+          <input value={form.landing.processEyebrow || ""} onChange={(event) => updateLandingField("processEyebrow", event.target.value)} />
+          <label>이용 방법 제목</label>
+          <input value={form.landing.processTitle || ""} onChange={(event) => updateLandingField("processTitle", event.target.value)} />
+          <label>이용 방법 설명</label>
+          <input value={form.landing.processDescription || ""} onChange={(event) => updateLandingField("processDescription", event.target.value)} />
+          <label>활용 사례 작은 문구</label>
+          <input value={form.landing.useCaseEyebrow || ""} onChange={(event) => updateLandingField("useCaseEyebrow", event.target.value)} />
+          <label>활용 사례 제목</label>
+          <input value={form.landing.useCaseTitle || ""} onChange={(event) => updateLandingField("useCaseTitle", event.target.value)} />
+          <label>활용 사례 설명</label>
+          <input value={form.landing.useCaseDescription || ""} onChange={(event) => updateLandingField("useCaseDescription", event.target.value)} />
+          <label>FAQ 작은 문구</label>
+          <input value={form.landing.faqEyebrow || ""} onChange={(event) => updateLandingField("faqEyebrow", event.target.value)} />
+          <label>FAQ 제목</label>
+          <input value={form.landing.faqTitle || ""} onChange={(event) => updateLandingField("faqTitle", event.target.value)} />
+          <label>하단 CTA 제목</label>
+          <input value={form.landing.ctaTitle || ""} onChange={(event) => updateLandingField("ctaTitle", event.target.value)} />
+          <label>하단 CTA 설명</label>
+          <textarea value={form.landing.ctaDescription || ""} onChange={(event) => updateLandingField("ctaDescription", event.target.value)} rows={3} />
+          <label>하단 CTA 버튼</label>
+          <input value={form.landing.ctaButton || ""} onChange={(event) => updateLandingField("ctaButton", event.target.value)} />
         </section>
 
         <section className="settings-panel">

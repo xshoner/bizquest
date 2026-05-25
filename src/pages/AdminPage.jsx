@@ -6,6 +6,7 @@ import {
   ArrowRight,
   Award,
   BarChart3,
+  Building2,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -17,8 +18,11 @@ import {
   FileDown,
   FileText,
   Flag,
+  Gamepad2,
   GraduationCap,
   Hash,
+  KeyRound,
+  LayoutDashboard,
   Lightbulb,
   LineChart,
   Mail,
@@ -33,6 +37,9 @@ import {
   QrCode,
   RotateCcw,
   Rocket,
+  ShieldCheck,
+  Smartphone,
+  Sparkles,
   Trophy,
   Trash2,
   Users
@@ -57,7 +64,8 @@ import {
 import { useAppSettings } from "../lib/appSettings.js";
 import { useRoom } from "../hooks/useRoom.js";
 import simulationBgm from "../images/bgm01.mp3";
-import landingImage from "../images/landing2.png";
+import heroBackgroundImage from "../images/landing-hero-ai-v2.png";
+import processRoadmapImage from "../images/landing-process-roadmap.png";
 
 const PHASES = [
   STATUSES.WAITING,
@@ -94,79 +102,213 @@ const eventCardImages = Object.fromEntries(
 
 function LandingPage({ appSettings, roomTitle, setRoomTitle, joinCode, setJoinCode, actionError, creating, createRoom, joinAsStudent }) {
   const landing = appSettings.landing;
+  const [quickStartTab, setQuickStartTab] = useState("teacher");
+  const navTargets = ["intro", "features", "class-flow", "cases", "faq"];
+  const featureIcons = [Gamepad2, Smartphone, LayoutDashboard];
+  const useCaseIcons = [GraduationCap, Rocket, Building2];
+  const flowIcons = [Users, Award, LineChart, Lightbulb, ClipboardCheck, PieChart, Cpu, Trophy];
 
   return (
     <section className="landing-page">
-      <section className="landing-hero">
-        <img src={landingImage} alt={landing.heroAlt} />
-        <a href="#quick-start" className="landing-hero-hotspot landing-hero-start">{landing.startLink}</a>
-        <a href="#class-flow" className="landing-hero-hotspot landing-hero-flow">{landing.flowLink}</a>
-      </section>
+      <nav className="landing-nav">
+        <a href="#top" className="landing-logo" aria-label="BizQuest home">
+          <span><Rocket size={24} /></span>
+          <strong>{landing.brandName}</strong>
+        </a>
+        <div className="landing-nav-actions">
+          {landing.featureButtons.map((label, index) => (
+            <a key={`${label}-${index}`} href={`#${navTargets[index] || "quick-start"}`}>{label}</a>
+          ))}
+        </div>
+      </nav>
 
-      <section id="quick-start" className="landing-quick-start">
+      <header id="top" className="landing-hero" style={{ "--landing-hero-image": `url(${heroBackgroundImage})` }}>
+        <div className="landing-hero-copy">
+          <p className="landing-kicker"><Sparkles size={17} /> {landing.heroBadge}</p>
+          <h1>{landing.heroTitle}</h1>
+          <p className="landing-lead">{landing.heroDescription}</p>
+          <div className="landing-hero-buttons">
+            <a href="#quick-start" className="landing-primary-button"><Rocket size={18} /> {landing.startLink}</a>
+            <a href="#class-flow" className="landing-secondary-button"><ArrowRight size={18} /> {landing.flowLink}</a>
+          </div>
+          <div className="landing-stat-row">
+            {landing.statItems.map((item) => (
+              <span key={item.title}><b>{item.description}</b>{item.title}</span>
+            ))}
+          </div>
+        </div>
+
+        <div id="quick-start" className="landing-quick-start">
+          <div className="landing-section-title">
+            <p>{landing.sectionEyebrow}</p>
+            <h2>{landing.sectionTitle}</h2>
+          </div>
+          <div className="landing-start-tabs" role="tablist" aria-label="빠른 시작 유형">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={quickStartTab === "teacher"}
+              className={quickStartTab === "teacher" ? "landing-start-tab landing-start-tab-active" : "landing-start-tab"}
+              onClick={() => setQuickStartTab("teacher")}
+            >
+              <ShieldCheck size={16} />
+              {landing.teacherTitle}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={quickStartTab === "student"}
+              className={quickStartTab === "student" ? "landing-start-tab landing-start-tab-active" : "landing-start-tab"}
+              onClick={() => setQuickStartTab("student")}
+            >
+              <KeyRound size={16} />
+              {landing.studentTitle}
+            </button>
+          </div>
+          <div className="landing-start-grid">
+            {quickStartTab === "teacher" && (
+            <section className="landing-start-card landing-start-card-primary">
+              <div className="landing-start-head">
+                <ShieldCheck size={32} />
+                <div>
+                  <h3>{landing.teacherTitle}</h3>
+                  <p>{landing.teacherDescription}</p>
+                </div>
+              </div>
+              <label>{landing.roomTitleLabel}</label>
+              <input value={roomTitle} onChange={(event) => setRoomTitle(event.target.value)} />
+              {actionError && <p className="landing-error">{actionError}</p>}
+              <button disabled={creating} onClick={createRoom} className="landing-action-button">
+                <Plus size={18} />
+                {creating ? landing.creatingButton : landing.createButton}
+              </button>
+            </section>
+            )}
+
+            {quickStartTab === "student" && (
+            <section className="landing-start-card">
+              <div className="landing-start-head">
+                <KeyRound size={32} />
+                <div>
+                  <h3>{landing.studentTitle}</h3>
+                  <p>{landing.studentDescription}</p>
+                </div>
+              </div>
+              <label>{landing.joinCodeLabel}</label>
+              <input value={joinCode} onChange={(event) => setJoinCode(event.target.value)} placeholder={landing.joinPlaceholder} className="landing-code-input" />
+              <button onClick={joinAsStudent} className="landing-action-button landing-action-dark">
+                {landing.joinButton}
+                <ArrowRight size={18} />
+              </button>
+            </section>
+            )}
+          </div>
+        </div>
+      </header>
+
+      <section id="intro" className="landing-section landing-intro">
         <div className="landing-section-title">
-          <p>{landing.sectionEyebrow}</p>
-          <h2>{landing.sectionTitle}</h2>
+          <p>{landing.introEyebrow}</p>
+          <h2>{landing.introTitle}</h2>
         </div>
-        <div className="landing-start-grid">
-          <section className="landing-start-card">
-            <div className="landing-start-head">
-              <GraduationCap size={34} />
-              <div>
-                <h3>{landing.teacherTitle}</h3>
-                <p>{landing.teacherDescription}</p>
-              </div>
-            </div>
-            <label>{landing.roomTitleLabel}</label>
-            <input value={roomTitle} onChange={(event) => setRoomTitle(event.target.value)} />
-            {actionError && <p className="landing-error">{actionError}</p>}
-            <button disabled={creating} onClick={createRoom} className="landing-action-button">
-              <Plus size={18} />
-              {creating ? landing.creatingButton : landing.createButton}
-            </button>
-          </section>
-
-          <section className="landing-start-card">
-            <div className="landing-start-head">
-              <QrCode size={34} />
-              <div>
-                <h3>{landing.studentTitle}</h3>
-                <p>{landing.studentDescription}</p>
-              </div>
-            </div>
-            <label>{landing.joinCodeLabel}</label>
-            <input value={joinCode} onChange={(event) => setJoinCode(event.target.value)} placeholder={landing.joinPlaceholder} className="landing-code-input" />
-            <button onClick={joinAsStudent} className="landing-action-button landing-action-dark">
-              {landing.joinButton}
-              <ArrowRight size={18} />
-            </button>
-          </section>
-        </div>
-      </section>
-
-      <section className="landing-feature-buttons" aria-label="준비 중인 메뉴">
-        {landing.featureButtons.map((label) => (
-          <button key={label} type="button">{label}</button>
-        ))}
-      </section>
-
-      <section className="landing-value-panel">
-        {landing.valueItems.map((item, index) => (
-          <article key={item.title}>
-            <span>{index + 1}</span>
-            <strong>{item.title}</strong>
-            <p>{item.description}</p>
+        <div className="landing-intro-grid">
+          <article className="landing-intro-copy">
+            <h3>{landing.introQuote}</h3>
+            <p>{landing.introBody}</p>
           </article>
-        ))}
+          <div className="landing-value-panel">
+            {landing.valueItems.map((item, index) => (
+              <article key={item.title}>
+                <span>{index + 1}</span>
+                <strong>{item.title}</strong>
+                <p>{item.description}</p>
+              </article>
+            ))}
+          </div>
+        </div>
       </section>
 
-      <section id="class-flow" className="landing-flow-panel">
-        {landing.flowSteps.map((label, index) => (
-          <button key={label} type="button">
-            <span>{index + 1}</span>
-            {label}
-          </button>
-        ))}
+      <section id="features" className="landing-section landing-muted-section">
+        <div className="landing-section-title">
+          <p>{landing.featureEyebrow}</p>
+          <h2>{landing.featureTitle}</h2>
+        </div>
+        <div className="landing-card-grid">
+          {landing.featureItems.map((item, index) => {
+            const Icon = featureIcons[index % featureIcons.length];
+            return (
+              <article key={item.title} className="landing-info-card">
+                <Icon size={26} />
+                <h3>{item.title}</h3>
+                <p>{item.description}</p>
+              </article>
+            );
+          })}
+        </div>
+      </section>
+
+      <section id="class-flow" className="landing-section landing-process-section" style={{ "--landing-process-image": `url(${processRoadmapImage})` }}>
+        <div className="landing-section-title">
+          <p>{landing.processEyebrow}</p>
+          <h2>{landing.processTitle}</h2>
+          <span>{landing.processDescription}</span>
+        </div>
+        <div className="landing-flow-panel">
+          {landing.flowSteps.map((label, index) => {
+            const Icon = flowIcons[index % flowIcons.length];
+            return (
+              <button key={`${label}-${index}`} type="button" className="landing-flow-card">
+                <span className="landing-flow-number">{index + 1}</span>
+                <b className="landing-flow-badge"><Icon size={24} /></b>
+                <strong>{label}</strong>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      <section id="cases" className="landing-section landing-muted-section">
+        <div className="landing-section-title">
+          <p>{landing.useCaseEyebrow}</p>
+          <h2>{landing.useCaseTitle}</h2>
+          <span>{landing.useCaseDescription}</span>
+        </div>
+        <div className="landing-card-grid">
+          {landing.useCases.map((item, index) => {
+            const Icon = useCaseIcons[index % useCaseIcons.length];
+            return (
+              <article key={item.title} className="landing-info-card landing-case-card">
+                <Icon size={26} />
+                <h3>{item.title}</h3>
+                <p>{item.description}</p>
+                {item.quote && <blockquote>{item.quote}</blockquote>}
+              </article>
+            );
+          })}
+        </div>
+      </section>
+
+      <section id="faq" className="landing-section">
+        <div className="landing-section-title">
+          <p>{landing.faqEyebrow}</p>
+          <h2>{landing.faqTitle}</h2>
+        </div>
+        <div className="landing-faq-list">
+          {landing.faqs.map((item) => (
+            <details key={item.title}>
+              <summary>{item.title}<ChevronDown size={18} /></summary>
+              <p>{item.description}</p>
+            </details>
+          ))}
+        </div>
+      </section>
+
+      <section className="landing-cta">
+        <div>
+          <h2>{landing.ctaTitle}</h2>
+          <p>{landing.ctaDescription}</p>
+        </div>
+        <a href="#quick-start" className="landing-primary-button"><Rocket size={18} /> {landing.ctaButton}</a>
       </section>
 
       <footer className="landing-footer">
