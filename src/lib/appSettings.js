@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { auth, db, doc, onSnapshot, signInAnonymously } from "../firebase.js";
+﻿import { useEffect, useState } from "react";
+import { auth, db, doc, getDoc, signInAnonymously } from "../firebase.js";
 
 export const DEFAULT_APP_SETTINGS = {
   adminPasscode: "7476",
@@ -146,26 +146,18 @@ export function useAppSettings() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    let unsubscribe = null;
     let mounted = true;
 
-    async function subscribe() {
+    async function loadSettings() {
       try {
         if (!auth.currentUser) await signInAnonymously(auth);
         if (!mounted) return;
-        unsubscribe = onSnapshot(
-          doc(db, ...APP_SETTINGS_PATH),
-          (snapshot) => {
-            const remoteSettings = snapshot.exists() ? snapshot.data() : {};
-            const localSettings = readLocalAppSettings();
-            setSettings(mergeAppSettings(newerSettings(localSettings, remoteSettings)));
-            setLoading(false);
-          },
-          (err) => {
-            setError(err.message || "설정 정보를 불러오지 못했습니다.");
-            setLoading(false);
-          }
-        );
+        const snapshot = await getDoc(doc(db, ...APP_SETTINGS_PATH));
+        if (!mounted) return;
+        const remoteSettings = snapshot.exists() ? snapshot.data() : {};
+        const localSettings = readLocalAppSettings();
+        setSettings(mergeAppSettings(newerSettings(localSettings, remoteSettings)));
+        setLoading(false);
       } catch (err) {
         if (!mounted) return;
         setError(err.message || "설정 정보를 불러오지 못했습니다.");
@@ -173,10 +165,9 @@ export function useAppSettings() {
       }
     }
 
-    subscribe();
+    loadSettings();
     return () => {
       mounted = false;
-      if (unsubscribe) unsubscribe();
     };
   }, []);
 
