@@ -338,6 +338,7 @@ export default function AdminPage() {
   const [qrCollapsed, setQrCollapsed] = useState(false);
   const [planTeam, setPlanTeam] = useState(null);
   const [opinionTeam, setOpinionTeam] = useState(null);
+  const [studentMenu, setStudentMenu] = useState(null);
   const [aiConfirmOpen, setAiConfirmOpen] = useState(false);
   const [evaluating, setEvaluating] = useState(false);
   const [simulationRunning, setSimulationRunning] = useState(false);
@@ -540,6 +541,46 @@ export default function AdminPage() {
     });
   }
 
+  async function assignStudentToTeam(uid, teamKey) {
+    const nickname = students[uid]?.nickname || "학생";
+    await updateDoc(doc(db, "rooms", roomId), {
+      [`students.${uid}.team`]: teamKey,
+      sysMessage: `${nickname} 학생을 ${teams[teamKey]?.teamName || "팀"}에 배정했습니다.`
+    });
+    setStudentMenu(null);
+  }
+
+  async function removeStudent(uid) {
+    const nickname = students[uid]?.nickname || "학생";
+    const nextStudents = { ...students };
+    delete nextStudents[uid];
+    const nextTeams = Object.fromEntries(Object.entries(teams).map(([key, team]) => [
+      key,
+      team.leaderId === uid ? { ...team, leaderId: null } : team
+    ]));
+    await updateDoc(doc(db, "rooms", roomId), {
+      students: nextStudents,
+      teams: nextTeams,
+      sysMessage: `${nickname} 학생을 대기실에서 내보냈습니다.`
+    });
+    setStudentMenu(null);
+  }
+
+  async function moveStudentToTeam(uid, teamKey) {
+    const nickname = students[uid]?.nickname || "학생";
+    const previousTeam = students[uid]?.team;
+    const nextTeams = Object.fromEntries(Object.entries(teams).map(([key, team]) => [
+      key,
+      previousTeam === key && team.leaderId === uid ? { ...team, leaderId: null } : team
+    ]));
+    await updateDoc(doc(db, "rooms", roomId), {
+      [`students.${uid}.team`]: teamKey,
+      teams: nextTeams,
+      sysMessage: `${nickname} 학생을 ${teams[teamKey]?.teamName || "팀"}으로 이동했습니다.`
+    });
+    setStudentMenu(null);
+  }
+
   async function lockBusinessPlan(teamKey) {
     await updateDoc(doc(db, "rooms", roomId), {
       [`teams.${teamKey}.ideaLocked`]: true,
@@ -640,17 +681,11 @@ export default function AdminPage() {
         ...(Array.isArray(freshRoom.eventHistory) ? freshRoom.eventHistory : []),
         { month, event }
       ];
-      const nextTeams = Object.fromEntries(
-        Object.entries(freshRoom.teams || {}).map(([key, team]) => {
-          const updated = applyRiskMultiplier(team, event);
-          const history = Array.isArray(team.assetHistory) && team.assetHistory.length > 0
-            ? team.assetHistory
-            : [{ month: 0, asset: Number(team.initialCapital || TEAM_BASE_ASSET) }];
-          return [key, { ...updated, assetHistory: [...history, { month, asset: updated.currentAsset }] }];
-        })
+      const eventPreviewTeams = Object.fromEntries(
+        Object.entries(freshRoom.teams || {}).map(([key, team]) => [key, { ...team, lastEventImpact: null }])
       );
       await updateDoc(doc(db, "rooms", roomId), {
-        teams: nextTeams,
+        teams: eventPreviewTeams,
         currentMonth: month,
         currentEvent: event,
         eventHistory: nextEventHistory,
@@ -658,8 +693,29 @@ export default function AdminPage() {
         simulationRunning: month < 24,
         status: STATUSES.SIMULATION,
         resultFinalizing: false,
-        sysMessage: month >= 24 ? "24개월 경영 시뮬레이션이 종료되었습니다. 교사가 최종 결과 버튼을 누르면 결과가 공개됩니다." : `${month}개월 차 이벤트: ${event.title}`
+        sysMessage: `${month}개월 차 이벤트: ${event.title}`
       });
+
+      window.setTimeout(async () => {
+        const applySnap = await getDoc(doc(db, "rooms", roomId));
+        if (!applySnap.exists()) return;
+        const applyRoom = applySnap.data();
+        if (Number(applyRoom.currentMonth || 0) !== month || applyRoom.currentEvent?.id !== event.id) return;
+        const nextTeams = Object.fromEntries(
+          Object.entries(applyRoom.teams || {}).map(([key, team]) => {
+            const updated = applyRiskMultiplier(team, event);
+            const history = Array.isArray(team.assetHistory) && team.assetHistory.length > 0
+              ? team.assetHistory
+              : [{ month: 0, asset: Number(team.initialCapital || TEAM_BASE_ASSET) }];
+            return [key, { ...updated, assetHistory: [...history, { month, asset: updated.currentAsset }] }];
+          })
+        );
+        await updateDoc(doc(db, "rooms", roomId), {
+          teams: nextTeams,
+          simulationRunning: month < 24,
+          sysMessage: month >= 24 ? "24개월 경영 시뮬레이션이 종료되었습니다. 교사가 최종 결과 버튼을 누르면 결과가 공개됩니다." : `${month}개월 차 이벤트 자산 변동이 반영되었습니다.`
+        });
+      }, 1500);
       if (month >= 24) {
         if (intervalRef.current) {
           clearInterval(intervalRef.current);
@@ -817,6 +873,7 @@ export default function AdminPage() {
       <PhaseRail currentStatus={room.status} onPhaseClick={handlePhaseClick} />
       {room.resultFinalizing && <ResultFinalizingShowcase />}
       <FanfareOnResult status={room.status} />
+      <ResultFireworks status={room.status} />
 
       <div className="mt-6 grid gap-5 lg:grid-cols-[320px_1fr]">
         <aside className="space-y-5">
@@ -836,14 +893,19 @@ export default function AdminPage() {
           <div className="rounded-lg bg-white p-5 shadow-lift">
             <h2 className="flex items-center gap-2 font-black"><Users size={18} /> 참가자 대기실</h2>
             <div className="mt-3 space-y-2">
-              {Object.entries(students).filter(([, student]) => !student.team).map(([uid, student]) => <div key={uid} className="flex items-center gap-3 rounded-lg bg-slate-50 px-3 py-2 text-sm"><span className={`grid h-8 w-8 place-items-center rounded-full bg-gradient-to-br ${getAvatarColor(uid)} text-xs font-black text-white shadow-sm`}>{student.nickname?.slice(0, 1) || "?"}</span><span className="font-semibold">{student.nickname}</span></div>)}
+              {Object.entries(students).filter(([, student]) => !student.team).map(([uid, student]) => (
+                <button key={uid} type="button" onClick={() => setStudentMenu({ uid, mode: "waiting" })} className="waiting-student-button">
+                  <span className={`grid h-8 w-8 place-items-center rounded-full bg-gradient-to-br ${getAvatarColor(uid)} text-xs font-black text-white shadow-sm`}>{student.nickname?.slice(0, 1) || "?"}</span>
+                  <span className="font-semibold">{student.nickname}</span>
+                </button>
+              ))}
               {Object.values(students).filter((student) => !student.team).length === 0 && <p className="text-sm text-slate-500">대기 중인 학생이 없습니다.</p>}
             </div>
           </div>
           {room.status === STATUSES.RESULT && <button onClick={() => window.print()} className="print:hidden touch-button inline-flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-3 font-bold text-white"><FileDown size={18} /> 수업 결과 PDF 저장</button>}
         </aside>
         <div className="print-main space-y-5">
-          <TeamGrid roomStatus={room.status} teams={teams} students={students} onSetLeader={setLeader} onRenameTeam={renameTeam} onAddTeam={addTeam} onDeleteTeam={deleteTeam} onLockPlan={lockBusinessPlan} onOpenPlan={setPlanTeam} onOpenOpinion={setOpinionTeam} />
+          <TeamGrid roomStatus={room.status} teams={teams} students={students} onOpenStudentMenu={(uid, teamKey) => setStudentMenu({ uid, teamKey, mode: "assigned" })} onRenameTeam={renameTeam} onAddTeam={addTeam} onDeleteTeam={deleteTeam} onLockPlan={lockBusinessPlan} onOpenPlan={setPlanTeam} onOpenOpinion={setOpinionTeam} />
           {investmentChartVisible && <InvestmentChart teams={teams} />}
           {room.status === STATUSES.RESULT && (
             <div ref={resultBoardRef}>
@@ -856,6 +918,7 @@ export default function AdminPage() {
       {aiConfirmOpen && <AiConfirmModal onCancel={() => setAiConfirmOpen(false)} onConfirm={() => { setAiConfirmOpen(false); evaluateBusinessPlans(); }} />}
       {planTeam && <BusinessPlanModal team={planTeam} onClose={() => setPlanTeam(null)} />}
       {opinionTeam && <AiOpinionModal team={opinionTeam} onClose={() => setOpinionTeam(null)} />}
+      {studentMenu && <StudentManageModal menu={studentMenu} students={students} teams={teams} onClose={() => setStudentMenu(null)} onAssign={assignStudentToTeam} onKick={removeStudent} onMove={moveStudentToTeam} onSetLeader={setLeader} />}
       {room.aiEvaluationStatus === "evaluating" && <AiEvaluationShowcase />}
       {room.status === STATUSES.SIMULATION && room.currentEvent && Number(room.currentMonth || 0) < 24 && (
         <AdminEventShowcase
@@ -878,7 +941,7 @@ function getStudentOrigin(localNetworkHost) {
   return origin;
 }
 
-function TeamGrid({ roomStatus, teams, students, onSetLeader, onRenameTeam, onAddTeam, onDeleteTeam, onLockPlan, onOpenPlan, onOpenOpinion }) {
+function TeamGrid({ roomStatus, teams, students, onOpenStudentMenu, onRenameTeam, onAddTeam, onDeleteTeam, onLockPlan, onOpenPlan, onOpenOpinion }) {
   const maxInvestment = Math.max(1, ...Object.values(teams).map((team) => Number(team.investmentsReceived || 0)));
   return (
     <section>
@@ -902,7 +965,7 @@ function TeamGrid({ roomStatus, teams, students, onSetLeader, onRenameTeam, onAd
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
                 {members.map((student) => (
-                  <button key={student.uid} onClick={() => onSetLeader(student.uid, key)} className={`team-member-chip ${team.leaderId === student.uid ? "team-member-chip-leader" : ""}`}>
+                  <button key={student.uid} onClick={() => onOpenStudentMenu(student.uid, key)} className={`team-member-chip ${team.leaderId === student.uid ? "team-member-chip-leader" : ""}`}>
                     {team.leaderId === student.uid && <Crown size={14} className="text-amber-500" />}
                     {student.nickname}
                     {student.cLevelResult?.key && <span className={`c-level-mini-badge c-level-mini-${student.cLevelResult.key}`}>{student.cLevelResult.key}</span>}
@@ -987,6 +1050,29 @@ function FanfareOnResult({ status }) {
     previous.current = status;
   }, [status]);
   return null;
+}
+
+function ResultFireworks({ status }) {
+  const previous = useRef(status);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    if (previous.current !== STATUSES.RESULT && status === STATUSES.RESULT) {
+      setVisible(true);
+      const timer = window.setTimeout(() => setVisible(false), 10000);
+      previous.current = status;
+      return () => window.clearTimeout(timer);
+    }
+    previous.current = status;
+    return undefined;
+  }, [status]);
+
+  if (!visible) return null;
+  return createPortal((
+    <div className="result-fireworks" aria-hidden="true">
+      {Array.from({ length: 22 }, (_, index) => <span key={index} />)}
+    </div>
+  ), document.body);
 }
 
 function AdminEventShowcase({ event, month, running, onPause, onResume }) {
@@ -1120,6 +1206,41 @@ function AiConfirmModal({ onCancel, onConfirm }) {
           <button type="button" onClick={onCancel} className="touch-button rounded-lg bg-slate-100 px-4 py-3 font-black text-slate-700">취소</button>
           <button type="button" onClick={onConfirm} className="touch-button rounded-lg bg-indigo-600 px-4 py-3 font-black text-white">시작</button>
         </div>
+      </article>
+    </div>
+  ), document.body);
+}
+
+function StudentManageModal({ menu, students, teams, onClose, onAssign, onKick, onMove, onSetLeader }) {
+  const student = students[menu.uid];
+  if (!student) return null;
+  const currentTeamKey = student.team || menu.teamKey || "";
+  const availableTeams = getTeamEntries(teams).filter(([key]) => key !== currentTeamKey);
+  return createPortal((
+    <div className="fixed inset-0 z-[9999] grid place-items-center bg-slate-950/70 p-5" onClick={onClose}>
+      <article className="w-full max-w-md rounded-lg bg-white p-5 shadow-lift" onClick={(event) => event.stopPropagation()}>
+        <p className="text-sm font-bold text-indigo-600">{menu.mode === "waiting" ? "대기 학생 관리" : "팀원 관리"}</p>
+        <h2 className="mt-1 text-2xl font-black">{student.nickname}</h2>
+        <div className="mt-4 grid gap-2">
+          {menu.mode === "assigned" && (
+            <button type="button" onClick={() => { onSetLeader(menu.uid, currentTeamKey); onClose(); }} className="touch-button inline-flex items-center justify-center gap-2 rounded-lg bg-amber-50 px-4 py-3 font-black text-amber-700 ring-1 ring-amber-200">
+              <Crown size={18} className="text-amber-500" />
+              팀장으로 지정
+            </button>
+          )}
+          {availableTeams.map(([key, team]) => (
+            <button key={key} type="button" onClick={() => menu.mode === "waiting" ? onAssign(menu.uid, key) : onMove(menu.uid, key)} className="touch-button rounded-lg bg-indigo-50 px-4 py-3 text-left font-black text-indigo-700 ring-1 ring-indigo-100">
+              {menu.mode === "waiting" ? "직접 팀 배정" : "다른 팀으로 이동"} · {team.teamName}
+            </button>
+          ))}
+          {availableTeams.length === 0 && <p className="rounded-lg bg-slate-50 px-4 py-3 text-sm font-bold text-slate-500">이동할 다른 팀이 없습니다.</p>}
+          {menu.mode === "waiting" && (
+            <button type="button" onClick={() => onKick(menu.uid)} className="touch-button rounded-lg bg-rose-600 px-4 py-3 font-black text-white">
+              강퇴
+            </button>
+          )}
+        </div>
+        <button type="button" onClick={onClose} className="touch-button mt-4 w-full rounded-lg bg-slate-900 px-4 py-3 font-black text-white">닫기</button>
       </article>
     </div>
   ), document.body);
@@ -1394,17 +1515,17 @@ function normalizeAssetHistory(team) {
 }
 
 function QrModal({ value, roomId, onClose }) {
-  return (
-    <div className="fixed inset-0 z-30 grid place-items-center bg-slate-950/80 p-5">
-      <div className="w-full max-w-xl rounded-lg bg-white p-6 text-center shadow-lift">
+  return createPortal((
+    <div className="qr-popover-backdrop" onClick={onClose}>
+      <div className="qr-popover" onClick={(event) => event.stopPropagation()}>
+        <button type="button" onClick={onClose} className="qr-popover-close">닫기</button>
         <p className="text-sm font-bold text-indigo-600">학생 입장 QR</p>
         <h2 className="mt-1 text-3xl font-black">방 코드 {roomId}</h2>
         <div className="mt-6 flex justify-center"><QRCodeSVG value={value} size={360} /></div>
         <p className="mt-4 break-all text-sm text-slate-500">{value}</p>
-        <button onClick={onClose} className="touch-button mt-5 w-full rounded-lg bg-slate-900 px-4 py-3 font-bold text-white">닫기</button>
       </div>
     </div>
-  );
+  ), document.body);
 }
 
 function stripJsonFence(text) {

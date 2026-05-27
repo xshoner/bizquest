@@ -92,6 +92,7 @@ export default function StudentPage() {
       <PhaseTransition status={room.status} />
       {room.resultFinalizing && <ResultFinalizingShowcase />}
       <FanfareOnResult status={room.status} />
+      <ResultFireworks status={room.status} />
       <StudentHeader room={room} uid={authUid} student={student} />
       {room.sysMessage && <div className="ticker-pulse mb-4 rounded-lg bg-indigo-50 px-4 py-3 text-sm font-bold text-indigo-700">{room.sysMessage}</div>}
       {room.status === STATUSES.WAITING && <WaitingRoom room={room} uid={authUid} />}
@@ -463,6 +464,29 @@ function FanfareOnResult({ status }) {
   }, [status]);
   return null;
 }
+
+function ResultFireworks({ status }) {
+  const previous = useRef(status);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    if (previous.current !== STATUSES.RESULT && status === STATUSES.RESULT) {
+      setVisible(true);
+      const timer = window.setTimeout(() => setVisible(false), 10000);
+      previous.current = status;
+      return () => window.clearTimeout(timer);
+    }
+    previous.current = status;
+    return undefined;
+  }, [status]);
+
+  if (!visible) return null;
+  return (
+    <div className="result-fireworks" aria-hidden="true">
+      {Array.from({ length: 22 }, (_, index) => <span key={index} />)}
+    </div>
+  );
+}
 function Ideation({ room, uid, student }) {
   const team = room.teams?.[student.team];
   const savedIdea = room.teams?.[student.team]?.idea;
@@ -556,7 +580,7 @@ function Ideation({ room, uid, student }) {
       <CanvasBlock title="아이디어 도출: 기존의 불편을 어떻게 해결하나요?">
         <textarea disabled={disabled} value={idea.solution} onChange={(event) => setIdea({ ...idea, solution: event.target.value })} className="min-h-32 w-full rounded-lg border border-slate-200 p-3 outline-none focus:border-indigo-500 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" placeholder={"AI로 자동 추천해줘요\n기다리지 않아도 돼요\n스마트폰으로 쉽게 해결해요\n게임처럼 재미있게 만들어요\n지역 사람들을 연결해줘요"} />
       </CanvasBlock>
-      <CanvasBlock title="제품/서비스 설명: 여러분의 제품이나 서비스를 설명해주세요">
+      <CanvasBlock title="제품/서비스 설명: 여러분의 아이디어가 실현될 제품이나 서비스를 상세히 설명해주세요">
         <textarea disabled={disabled} value={idea.product} onChange={(event) => setIdea({ ...idea, product: event.target.value })} className="min-h-32 w-full rounded-lg border border-slate-200 p-3 outline-none focus:border-indigo-500 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" placeholder={"AI 기반 공부 도우미 앱\n반려동물 건강 관리 서비스\n지역 여행 추천 플랫폼\n친환경 배달 포장 서비스\n팀빌딩 게임 교육 플랫폼"} />
       </CanvasBlock>
       <CanvasBlock title="수익모델: 돈을 어떻게 버나요?">
@@ -814,9 +838,11 @@ function StudentAiEvaluationReport({ team }) {
 
 function StudentEventShowcase({ event, impact, month, team }) {
   const [impactVisible, setImpactVisible] = useState(false);
-  const rate = impact?.eventId === event.id ? Number(impact.rate || 0) : 0;
-  const beforeAsset = Number(impact?.beforeAsset ?? team?.initialCapital ?? TEAM_BASE_ASSET);
-  const afterAsset = Number(impact?.afterAsset ?? team?.currentAsset ?? TEAM_BASE_ASSET);
+  const activeImpact = impact?.eventId === event.id ? impact : null;
+  const rate = activeImpact ? Number(activeImpact.rate || 0) : 0;
+  const currentAsset = Number(team?.currentAsset ?? team?.initialCapital ?? TEAM_BASE_ASSET);
+  const beforeAsset = Number(activeImpact?.beforeAsset ?? currentAsset);
+  const afterAsset = Number(activeImpact?.afterAsset ?? currentAsset);
   const changedAmount = afterAsset - beforeAsset;
   const changePct = beforeAsset ? Math.round(((afterAsset - beforeAsset) / beforeAsset) * 1000) / 10 : 0;
   const history = Array.isArray(team?.assetHistory) ? team.assetHistory.slice(-6) : [];
@@ -833,7 +859,7 @@ function StudentEventShowcase({ event, impact, month, team }) {
   useEffect(() => {
     playWhoosh();
     setImpactVisible(false);
-    const timer = window.setTimeout(() => setImpactVisible(true), 2000);
+    const timer = window.setTimeout(() => setImpactVisible(true), 1500);
     return () => window.clearTimeout(timer);
   }, [event.id, month]);
 
@@ -842,17 +868,18 @@ function StudentEventShowcase({ event, impact, month, team }) {
       <div className="event-spark event-spark-one" />
       <div className="event-spark event-spark-two" />
       <EventCardVisual event={event}>
-        {impactVisible && (
+        {impactVisible && activeImpact && (
           <div className={`student-impact-number ${rate >= 0 ? "student-impact-positive" : "student-impact-negative"}`}>
+            <span className="student-impact-arrow">{rate >= 0 ? "▲" : "▼"}</span>
             {rate > 0 ? "+" : ""}{rate}%!!
           </div>
         )}
       </EventCardVisual>
-      <div className={`student-event-asset-overlay ${changedAmount < 0 ? "student-event-asset-negative" : "student-event-asset-positive"}`}>
+      <div className={`student-event-asset-overlay ${activeImpact ? "student-event-asset-applied" : "student-event-asset-waiting"} ${changedAmount < 0 ? "student-event-asset-negative" : "student-event-asset-positive"}`}>
         <div>
-          <p>우리 팀 실시간 자산</p>
+          <p>{activeImpact ? "우리 팀 실시간 자산" : "현재 자산 현황"}</p>
           <strong>{formatWon(afterAsset)}</strong>
-          <span>{changedAmount >= 0 ? "+" : ""}{formatWon(changedAmount)} · {changePct >= 0 ? "+" : ""}{changePct}%</span>
+          {activeImpact && <span>{changedAmount >= 0 ? "+" : ""}{formatWon(changedAmount)} · {changePct >= 0 ? "+" : ""}{changePct}%</span>}
         </div>
         <svg viewBox="0 0 100 56" role="img" aria-label="우리 팀 자산 변화 그래프">
           <polyline points={graphPoints} />
@@ -896,7 +923,7 @@ function Result({ room }) {
           <div className="rounded-lg bg-white/95 p-5">
             <p className="text-sm font-black text-amber-700">1위 팀</p>
             <h3 className="mt-1 text-4xl font-black text-slate-950">{winner.teamName}</h3>
-            <p className="mt-3 rounded-lg bg-slate-950 px-4 py-3 text-right text-3xl font-black text-white">{formatWon(winner.currentAsset || 0)}</p>
+            <AssetChangeSummary team={winner} featured className="mt-3" />
             <AssetTrendChart team={winner} className="mt-4" />
           </div>
         </button>
@@ -922,6 +949,7 @@ function Result({ room }) {
               <span className="font-black">{index + 1}. {team.teamName}</span>
               <span className={`font-bold ${index === 0 ? "text-amber-700" : Number(team.currentAsset || 0) < 0 ? "text-rose-600" : "text-indigo-600"}`}>{formatWon(team.currentAsset || 0)}</span>
             </div>
+            <AssetChangeSummary team={team} className="mt-2" />
             <div className="mt-2 flex flex-wrap gap-1">
               {getStudentsByTeam(room.students, team.key).map((member) => (
                 <span key={member.uid} className="rounded-full bg-white px-2 py-1 text-[11px] font-black text-slate-600 ring-1 ring-slate-200">{member.nickname}</span>
@@ -955,6 +983,30 @@ function AssetBars({ teams, currentMonth = 0 }) {
     </div>
   );
 }
+
+function AssetChangeSummary({ team, featured = false, className = "" }) {
+  const initial = Number(team.initialCapital || TEAM_BASE_ASSET + Number(team.investmentsReceived || 0));
+  const final = Number(team.currentAsset || 0);
+  const rate = initial ? ((final - initial) / initial) * 100 : 0;
+  const positive = rate >= 0;
+  return (
+    <div className={`asset-change-summary ${featured ? "asset-change-summary-featured" : ""} ${className}`}>
+      <div>
+        <p>최초 총 자산</p>
+        <strong>{formatWon(initial)}</strong>
+      </div>
+      <div>
+        <p>최종 총 자산</p>
+        <strong>{formatWon(final)}</strong>
+      </div>
+      <div className={positive ? "asset-change-positive" : "asset-change-negative"}>
+        <p>증감율</p>
+        <strong>{positive ? "+" : ""}{rate.toFixed(1)}%</strong>
+      </div>
+    </div>
+  );
+}
+
 function CanvasBlock({ title, children }) {
   return <section className="mt-4 rounded-lg bg-white p-4 shadow-lift"><h3 className="mb-3 flex items-center gap-2 font-black"><Lightbulb size={18} /> {title}</h3>{children}</section>;
 }
@@ -1234,8 +1286,8 @@ function ReportModal({ team, members = [], onClose }) {
           <p><b>고객정의:</b> {(team.idea?.customers || []).join(", ") || "-"}</p>
           <p><b>제품/서비스:</b> {team.idea?.product || "-"}</p>
           <p><b>수익모델:</b> {(team.idea?.revenueModels || []).join(", ") || "-"}</p>
-          <p><b>초기 자본:</b> {formatWon(team.initialCapital || 0)}</p>
-          <p><b>최종 자산:</b> {formatWon(team.currentAsset || 0)}</p>
+          <p><b>최초 총 자산:</b> {formatWon(team.initialCapital || 0)}</p>
+          <p><b>최종 총 자산:</b> {formatWon(team.currentAsset || 0)}</p>
           <p><b>최종 수익:</b> <span className={profit >= 0 ? "text-emerald-600" : "text-rose-600"}>{formatWon(profit)}</span></p>
         </div>
         <button onClick={onClose} className="touch-button mt-5 w-full rounded-lg bg-slate-900 px-4 py-3 font-bold text-white">닫기</button>
