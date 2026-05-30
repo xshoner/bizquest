@@ -988,7 +988,10 @@ export default function AdminPage() {
             {!qrCollapsed && (
               <>
                 <div className="mt-4 flex justify-center rounded-lg bg-white p-3"><QRCodeSVG value={studentUrl} size={190} /></div>
-                <p className="mt-3 break-all text-xs text-slate-500">{studentUrl}</p>
+                <div className="mt-3 rounded-lg bg-indigo-50 px-4 py-3 text-center">
+                  <p className="text-xs font-black text-indigo-500">방 코드</p>
+                  <strong className="block text-3xl font-black tracking-[0.16em] text-indigo-700">{roomId}</strong>
+                </div>
                 <button onClick={() => setQrOpen(true)} className="touch-button mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 py-3 font-bold text-white"><Maximize2 size={18} /> 크게 보기</button>
               </>
             )}

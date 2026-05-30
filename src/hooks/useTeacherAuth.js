@@ -13,6 +13,7 @@ import {
 } from "../firebase.js";
 
 const TEACHER_REGISTRY_KEY = "bizquest-teacher-registry";
+const TEACHER_SESSION_KEY = "bizquest-teacher-session-active";
 
 export function idToAuthEmail(id) {
   const normalized = String(id || "").trim().toLowerCase();
@@ -21,6 +22,23 @@ export function idToAuthEmail(id) {
 
 function sanitizeTeacherId(id) {
   return String(id || "").trim().replace(/\s+/g, "");
+}
+
+function markTeacherSession() {
+  if (typeof window !== "undefined") {
+    window.sessionStorage.setItem(TEACHER_SESSION_KEY, "true");
+  }
+}
+
+function clearTeacherSession() {
+  if (typeof window !== "undefined") {
+    window.sessionStorage.removeItem(TEACHER_SESSION_KEY);
+  }
+}
+
+function hasTeacherSession() {
+  if (typeof window === "undefined") return false;
+  return window.sessionStorage.getItem(TEACHER_SESSION_KEY) === "true";
 }
 
 export function validateTeacherPassword(password) {
@@ -55,9 +73,18 @@ export function useTeacherAuth() {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (nextUser) => {
-      setUser(nextUser);
-      setTeacherId(nextUser?.displayName || localStorage.getItem("bizquest-teacher-id") || "");
+    const unsubscribe = onAuthStateChanged(auth, async (nextUser) => {
+      if (nextUser && !nextUser.isAnonymous && !hasTeacherSession()) {
+        await signOut(auth).catch(() => {});
+        localStorage.removeItem("bizquest-teacher-id");
+        setUser(null);
+        setTeacherId("");
+        setReady(true);
+        return;
+      }
+
+      setUser(nextUser && !nextUser.isAnonymous ? nextUser : null);
+      setTeacherId(nextUser && !nextUser.isAnonymous ? nextUser.displayName || localStorage.getItem("bizquest-teacher-id") || "" : "");
       setReady(true);
     });
     return () => unsubscribe();
@@ -68,8 +95,16 @@ export function useTeacherAuth() {
 
 export async function loginTeacher(id, password) {
   const teacherId = sanitizeTeacherId(id);
-  if (!teacherId || !password) throw new Error("id와 pw를 입력하세요.");
-  const credential = await signInWithEmailAndPassword(auth, idToAuthEmail(teacherId), password);
+  if (!teacherId || !password) throw new Error("아이디와 비밀번호를 입력하세요.");
+  let credential;
+  try {
+    credential = await signInWithEmailAndPassword(auth, idToAuthEmail(teacherId), password);
+  } catch (err) {
+    if (["auth/invalid-credential", "auth/user-not-found", "auth/wrong-password", "auth/invalid-email"].includes(err.code)) {
+      throw new Error("아이디 또는 비밀번호가 올바르지 않습니다.");
+    }
+    throw new Error(err.message || "로그인에 실패했습니다.");
+  }
   if (credential.user.displayName !== teacherId) {
     await updateProfile(credential.user, { displayName: teacherId });
   }
@@ -79,6 +114,7 @@ export async function loginTeacher(id, password) {
     authEmail: idToAuthEmail(teacherId),
     lastLoginAt: Date.now()
   }, { merge: true });
+  markTeacherSession();
   localStorage.setItem("bizquest-teacher-id", teacherId);
   return credential.user;
 }
@@ -100,6 +136,7 @@ export async function registerTeacher({ id, email, password, createdBy = "self",
   await setDoc(doc(db, "users", credential.user.uid, "profile", "account"), profile);
   rememberTeacher(profile);
   if (authInstance === auth) {
+    markTeacherSession();
     localStorage.setItem("bizquest-teacher-id", teacherId);
   }
   return { user: credential.user, profile };
@@ -128,6 +165,7 @@ export async function createManagedTeacher(adminUser, payload) {
 }
 
 export async function logoutTeacher() {
+  clearTeacherSession();
   localStorage.removeItem("bizquest-teacher-id");
   await signOut(auth);
 }

@@ -14,6 +14,12 @@ function uniqueUsers(items) {
   return [...map.values()].sort((a, b) => Number(b.createdAt || b.savedAt || 0) - Number(a.createdAt || a.savedAt || 0));
 }
 
+function displayEmail(item) {
+  const email = String(item?.email || "").trim();
+  if (email && !email.endsWith("@bizquest.local")) return email;
+  return "-";
+}
+
 export default function SettingsPage() {
   const authState = useTeacherAuth();
   const { settings, loading, error } = useAppSettings();
@@ -32,8 +38,7 @@ export default function SettingsPage() {
     const current = authState.user ? [{
       uid: authState.user.uid,
       id: authState.teacherId || authState.user.displayName || "",
-      email: authState.user.email || "",
-      authEmail: authState.user.email || "",
+      email: "",
       createdBy: "current",
       savedAt: Date.now()
     }] : [];
@@ -215,7 +220,7 @@ export default function SettingsPage() {
       <div className="settings-grid">
         <section className="settings-panel">
           <h2><KeyRound size={20} /> 교사 회원 관리</h2>
-          <p className="settings-help">회원가입한 계정과 관리자가 생성한 계정을 리스트로 확인합니다.</p>
+          <p className="settings-help">회원가입한 계정과 관리자가 생성한 계정을 확인합니다.</p>
           {!authState.loggedIn && <p className="settings-status settings-status-error">회원 생성은 로그인 후 사용할 수 있습니다.</p>}
           <label>id</label>
           <input value={managedForm.id} onChange={(event) => updateManagedField("id", event.target.value)} disabled={!authState.loggedIn || busy} />
@@ -230,8 +235,7 @@ export default function SettingsPage() {
             {teacherUsers.map((item) => (
               <article key={item.uid || item.id}>
                 <strong>{item.id || "-"}</strong>
-                <span>{item.email || item.authEmail || "-"}</span>
-                <code>{item.password ? `pw: ${item.password}` : "pw: 보안상 표시되지 않음"}</code>
+                <span>{displayEmail(item)}</span>
               </article>
             ))}
             {teacherUsers.length === 0 && <p className="settings-help">아직 확인 가능한 회원이 없습니다.</p>}
