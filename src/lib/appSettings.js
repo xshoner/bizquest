@@ -1,5 +1,5 @@
 ﻿import { useEffect, useState } from "react";
-import { auth, db, doc, getDoc, signInAnonymously } from "../firebase.js";
+import { auth, db, doc, getDoc } from "../firebase.js";
 
 export const DEFAULT_APP_SETTINGS = {
   adminPasscode: "7476",
@@ -150,7 +150,11 @@ export function useAppSettings() {
 
     async function loadSettings() {
       try {
-        if (!auth.currentUser) await signInAnonymously(auth);
+        if (!auth.currentUser) {
+          setSettings(mergeAppSettings(readLocalAppSettings() || DEFAULT_APP_SETTINGS));
+          setLoading(false);
+          return;
+        }
         if (!mounted) return;
         const snapshot = await getDoc(doc(db, ...APP_SETTINGS_PATH));
         if (!mounted) return;

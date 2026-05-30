@@ -1,7 +1,7 @@
 ﻿import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { Award, Check, CircleDollarSign, Crown, Lightbulb, Pencil, Send, TrendingUp } from "lucide-react";
-import { auth, db, doc, onAuthStateChanged, signInAnonymously, updateDoc } from "../firebase.js";
+import { auth, onAuthStateChanged, signInAnonymously, updateDoc } from "../firebase.js";
 import {
   C_LEVEL_KEYS,
   C_LEVEL_QUESTIONS,
@@ -17,7 +17,7 @@ import {
   TREND_CARDS
 } from "../data/gameData.js";
 import { TEAM_BASE_ASSET, formatWon, getStudentsByTeam, getTeamEntries, normalizeTeamName, rankTeams, recalculateInvestments } from "../lib/game.js";
-import { useRoom } from "../hooks/useRoom.js";
+import { roomDocRef, useRoom } from "../hooks/useRoom.js";
 
 const BUDGET = 50000000;
 const trendCardImages = Object.entries(import.meta.glob("../images/B*.png", { eager: true, import: "default" }))
@@ -34,7 +34,9 @@ const eventCardImages = Object.fromEntries(
 
 export default function StudentPage() {
   const { roomId } = useParams();
-  const { room, loading, error } = useRoom(roomId);
+  const [searchParams] = useSearchParams();
+  const ownerUid = searchParams.get("owner") || "";
+  const { room, loading, error } = useRoom(roomId, ownerUid);
   const [nickname, setNickname] = useState("");
   const [joining, setJoining] = useState(false);
   const [authUid, setAuthUid] = useState(localStorage.getItem(`startupHero:${roomId}:uid`) || "");
@@ -62,7 +64,7 @@ export default function StudentPage() {
     setAuthUid(nextUid);
     localStorage.setItem(`startupHero:${roomId}:uid`, nextUid);
     localStorage.setItem("startupHero:lastRoomId", roomId);
-    await updateDoc(doc(db, "rooms", roomId), {
+    await updateDoc(roomDocRef(ownerUid, roomId), {
       [`students.${nextUid}`]: { uid: nextUid, nickname: nickname.trim(), team: null, cLevelResult: null, investments: {}, investmentSubmitted: false },
       sysMessage: `${nickname.trim()} 학생이 입장했습니다.`
     });
@@ -71,6 +73,7 @@ export default function StudentPage() {
 
   if (loading || !authReady) return <MobileFrame>방 정보를 불러오는 중입니다.</MobileFrame>;
   if (error) return <MobileFrame>{error}</MobileFrame>;
+  if (!ownerUid) return <MobileFrame><p>잘못된 QR 주소입니다. 교사가 새 QR을 보여주면 다시 입장하세요.</p><Link className="mt-4 inline-block font-bold text-indigo-600" to="/">메인으로 이동</Link></MobileFrame>;
   if (!room) return <MobileFrame><p>존재하지 않는 방입니다.</p><Link className="mt-4 inline-block font-bold text-indigo-600" to="/">메인으로 이동</Link></MobileFrame>;
 
   if (!student) {
@@ -152,7 +155,7 @@ function StudentHeader({ room, uid, student }) {
   async function saveTeamName() {
     if (!student.team || !isLeader) return;
     const nextName = normalizeTeamName(name.trim() || myTeam.teamName);
-    await updateDoc(doc(db, "rooms", room.roomId), {
+    await updateDoc(roomDocRef(room.ownerUid, room.roomId), {
       [`teams.${student.team}.teamName`]: nextName,
       sysMessage: `${nextName}으로 팀명이 변경되었습니다.`
     });
@@ -185,7 +188,7 @@ function WaitingRoom({ room, uid }) {
     const currentTeam = room.students?.[uid]?.team;
     const nextTeam = currentTeam === teamKey ? null : teamKey;
     const nickname = room.students?.[uid]?.nickname || "학생";
-    await updateDoc(doc(db, "rooms", room.roomId), {
+    await updateDoc(roomDocRef(room.ownerUid, room.roomId), {
       [`students.${uid}.team`]: nextTeam,
       sysMessage: nextTeam
         ? `${nickname} 학생이 ${room.teams?.[teamKey]?.teamName || "팀"}에 합류했습니다.`
@@ -249,7 +252,7 @@ function CLevelDiagnosis({ room, uid, student }) {
       completedAt: Date.now()
     };
     setSaving(true);
-    await updateDoc(doc(db, "rooms", room.roomId), {
+    await updateDoc(roomDocRef(room.ownerUid, room.roomId), {
       [`students.${uid}.cLevelResult`]: payload,
       sysMessage: `${student.nickname} 학생의 C레벨 자가진단 결과는 ${type.key}입니다.`
     });
@@ -370,7 +373,7 @@ function CardSelect({ room, uid, student }) {
 
   async function confirmTrend() {
     if (!selectedTrend || !isLeader) return;
-    await updateDoc(doc(db, "rooms", room.roomId), {
+    await updateDoc(roomDocRef(room.ownerUid, room.roomId), {
       [`teams.${student.team}.trendCard`]: selectedTrend,
       sysMessage: `${myTeam?.teamName || "팀"}이 ${selectedTrend.title} 트렌드 카드를 선택했습니다.`
     });
@@ -383,7 +386,7 @@ function CardSelect({ room, uid, student }) {
       ...(room.teams || {}),
       [student.team]: { ...myTeam, trendCard: selectedTrend, techCard: selectedTech }
     };
-    await updateDoc(doc(db, "rooms", room.roomId), {
+    await updateDoc(roomDocRef(room.ownerUid, room.roomId), {
       teams: nextTeams,
       status: room.status,
       sysMessage: `${myTeam?.teamName || "팀"}이 ${selectedTrend.title} 트렌드와 ${selectedTech.title} 기술카드를 확정했습니다. 교사가 다음 단계로 이동할 때까지 기다려 주세요.`
@@ -519,7 +522,7 @@ function Ideation({ room, uid, student }) {
     };
     const activeTeams = Object.keys(nextTeams).filter((teamKey) => Object.values(room.students || {}).some((member) => member.team === teamKey));
     const allActiveTeamsSubmitted = activeTeams.length > 0 && activeTeams.every((teamKey) => nextTeams[teamKey]?.idea && nextTeams[teamKey]?.ideaSubmitted !== false);
-    await updateDoc(doc(db, "rooms", room.roomId), {
+    await updateDoc(roomDocRef(room.ownerUid, room.roomId), {
       teams: nextTeams,
       aiEvaluationStatus: allActiveTeamsSubmitted ? "idle" : room.aiEvaluationStatus || "idle",
       status: room.status,
@@ -532,7 +535,7 @@ function Ideation({ room, uid, student }) {
 
   async function unlockIdea() {
     if (!isLeader || locked) return;
-    await updateDoc(doc(db, "rooms", room.roomId), {
+    await updateDoc(roomDocRef(room.ownerUid, room.roomId), {
       [`teams.${student.team}.ideaSubmitted`]: false,
       [`teams.${student.team}.aiEvaluation`]: null,
       aiEvaluationStatus: "idle",
@@ -626,7 +629,7 @@ function Investment({ room, uid, student }) {
 
   async function submit() {
     const { students, teams } = recalculateInvestments(room, uid, investments);
-    await updateDoc(doc(db, "rooms", room.roomId), {
+    await updateDoc(roomDocRef(room.ownerUid, room.roomId), {
       students,
       teams,
       sysMessage: `${student.nickname} 학생이 투자를 확정했습니다.`
@@ -891,7 +894,7 @@ function StudentEventShowcase({ event, impact, month, team }) {
 function DecisionVote({ room, uid, student, team }) {
   const currentVote = team?.midDecision?.votes?.[uid];
   async function vote(choice) {
-    await updateDoc(doc(db, "rooms", room.roomId), {
+    await updateDoc(roomDocRef(room.ownerUid, room.roomId), {
       [`teams.${student.team}.midDecision.votes.${uid}`]: choice,
       sysMessage: `${team?.teamName || "팀"}에서 긴급 의사결정 투표가 진행 중입니다.`
     });
@@ -1298,4 +1301,5 @@ function ReportModal({ team, members = [], onClose }) {
 function Notice({ children }) {
   return <div className="rounded-lg bg-white p-5 text-center font-bold shadow-lift">{children}</div>;
 }
+
 

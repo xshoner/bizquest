@@ -1,73 +1,53 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { AlertTriangle, KeyRound, RotateCcw, Save, Settings, Trash2 } from "lucide-react";
 import { collection, db, doc, getDocs, setDoc, writeBatch } from "../firebase.js";
+import { createManagedTeacher, readLocalTeacherRegistry, useTeacherAuth } from "../hooks/useTeacherAuth.js";
 import { APP_SETTINGS_PATH, DEFAULT_APP_SETTINGS, LOCAL_APP_SETTINGS_KEY, mergeAppSettings, useAppSettings } from "../lib/appSettings.js";
 
-function linesToList(value) {
-  return String(value || "")
-    .split("\n")
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function listToLines(value = []) {
-  return value.join("\n");
-}
-
-function valueItemsToText(items = []) {
-  return items.map((item) => `${item.title} | ${item.description}`).join("\n");
-}
-
-function textToValueItems(value) {
-  return linesToList(value).map((line) => {
-    const [title, ...descriptionParts] = line.split("|").map((part) => part.trim());
-    return {
-      title: title || "제목",
-      description: descriptionParts.join(" | ") || ""
-    };
-  });
+function uniqueUsers(items) {
+  const map = new Map();
+  for (const item of items) {
+    if (!item?.id && !item?.uid) continue;
+    map.set(item.uid || item.id, item);
+  }
+  return [...map.values()].sort((a, b) => Number(b.createdAt || b.savedAt || 0) - Number(a.createdAt || a.savedAt || 0));
 }
 
 export default function SettingsPage() {
+  const authState = useTeacherAuth();
   const { settings, loading, error } = useAppSettings();
   const [unlocked, setUnlocked] = useState(localStorage.getItem("bizquest-settings-unlocked") === "true");
   const [passcode, setPasscode] = useState("");
-  const [form, setForm] = useState(settings);
-  const [featureText, setFeatureText] = useState("");
-  const [flowText, setFlowText] = useState("");
-  const [valueText, setValueText] = useState("");
-  const [statText, setStatText] = useState("");
-  const [featureItemText, setFeatureItemText] = useState("");
-  const [useCaseText, setUseCaseText] = useState("");
-  const [faqText, setFaqText] = useState("");
+  const [form, setForm] = useState(() => mergeAppSettings(settings));
   const [status, setStatus] = useState("");
+  const [busy, setBusy] = useState(false);
   const [roomCount, setRoomCount] = useState(null);
   const [resetConfirm, setResetConfirm] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [managedUsers, setManagedUsers] = useState([]);
+  const [localUsers, setLocalUsers] = useState(() => readLocalTeacherRegistry());
+  const [managedForm, setManagedForm] = useState({ id: "", password: "", email: "" });
+
+  const teacherUsers = useMemo(() => {
+    const current = authState.user ? [{
+      uid: authState.user.uid,
+      id: authState.teacherId || authState.user.displayName || "",
+      email: authState.user.email || "",
+      authEmail: authState.user.email || "",
+      createdBy: "current",
+      savedAt: Date.now()
+    }] : [];
+    return uniqueUsers([...managedUsers, ...localUsers, ...current]);
+  }, [authState.teacherId, authState.user, localUsers, managedUsers]);
 
   useEffect(() => {
-    const nextSettings = mergeAppSettings(settings);
-    setForm(nextSettings);
-    setFeatureText(listToLines(nextSettings.landing.featureButtons));
-    setFlowText(listToLines(nextSettings.landing.flowSteps));
-    setValueText(valueItemsToText(nextSettings.landing.valueItems));
-    setStatText(valueItemsToText(nextSettings.landing.statItems));
-    setFeatureItemText(valueItemsToText(nextSettings.landing.featureItems));
-    setUseCaseText((nextSettings.landing.useCases || []).map((item) => `${item.title} | ${item.description} | ${item.quote || ""}`).join("\n"));
-    setFaqText(valueItemsToText(nextSettings.landing.faqs));
+    setForm(mergeAppSettings(settings));
   }, [settings]);
 
-  function updateField(key, value) {
-    setForm((current) => ({ ...current, [key]: value }));
-  }
-
-  function updateLandingField(key, value) {
-    setForm((current) => ({
-      ...current,
-      landing: { ...current.landing, [key]: value }
-    }));
-  }
+  useEffect(() => {
+    setLocalUsers(readLocalTeacherRegistry());
+    if (unlocked && authState.user?.uid) loadManagedUsers();
+  }, [unlocked, authState.user?.uid]);
 
   function unlock() {
     if (passcode.trim() !== String(settings.adminPasscode || DEFAULT_APP_SETTINGS.adminPasscode)) {
@@ -79,35 +59,30 @@ export default function SettingsPage() {
     setStatus("");
   }
 
+  function updateField(key, value) {
+    setForm((current) => ({ ...current, [key]: value }));
+  }
+
+  function updateLandingField(key, value) {
+    setForm((current) => ({ ...current, landing: { ...current.landing, [key]: value } }));
+  }
+
+  function updateManagedField(key, value) {
+    setManagedForm((current) => ({ ...current, [key]: value }));
+  }
+
   async function saveSettings() {
     setBusy(true);
     setStatus("");
     try {
-      const payload = mergeAppSettings({
-        ...form,
-        landing: {
-          ...form.landing,
-          featureButtons: linesToList(featureText),
-          flowSteps: linesToList(flowText),
-          valueItems: textToValueItems(valueText),
-          statItems: textToValueItems(statText),
-          featureItems: textToValueItems(featureItemText),
-          useCases: linesToList(useCaseText).map((line) => {
-            const [title, description, quote] = line.split("|").map((part) => part.trim());
-            return { title: title || "활용 사례", description: description || "", quote: quote || "" };
-          }),
-          faqs: textToValueItems(faqText)
-        }
-      });
-      const cleanPayload = JSON.parse(JSON.stringify({
-        ...payload,
-        updatedAt: Date.now()
-      }));
+      const cleanPayload = JSON.parse(JSON.stringify({ ...mergeAppSettings(form), updatedAt: Date.now() }));
       delete cleanPayload.geminiApiKey;
       localStorage.setItem(LOCAL_APP_SETTINGS_KEY, JSON.stringify(cleanPayload));
-      await setDoc(doc(db, ...APP_SETTINGS_PATH), cleanPayload);
+      if (authState.user?.uid) {
+        await setDoc(doc(db, ...APP_SETTINGS_PATH), cleanPayload).catch(() => {});
+      }
       setForm(cleanPayload);
-      setStatus("설정을 저장했습니다. 메인 홈페이지와 AI 평가에 바로 반영됩니다.");
+      setStatus("설정을 저장했습니다.");
     } catch (err) {
       setStatus(err.message || "설정 저장에 실패했습니다.");
     } finally {
@@ -115,21 +90,55 @@ export default function SettingsPage() {
     }
   }
 
-  async function loadRoomCount() {
+  async function loadManagedUsers() {
+    if (!authState.user?.uid) return;
+    try {
+      const snapshot = await getDocs(collection(db, "users", authState.user.uid, "managedUsers"));
+      setManagedUsers(snapshot.docs.map((item) => item.data()));
+      setLocalUsers(readLocalTeacherRegistry());
+    } catch (err) {
+      setStatus(err.message || "회원 리스트를 불러오지 못했습니다.");
+    }
+  }
+
+  async function createManagedUser() {
     setBusy(true);
     setStatus("");
     try {
-      const snapshot = await getDocs(collection(db, "rooms"));
-      setRoomCount(snapshot.size);
-      setStatus(`현재 삭제 대상 게임방 데이터는 ${snapshot.size}개입니다.`);
+      await createManagedTeacher(authState.user, managedForm);
+      setManagedForm({ id: "", password: "", email: "" });
+      await loadManagedUsers();
+      setStatus("회원을 생성했습니다. 생성한 id/pw로 로그인할 수 있습니다.");
     } catch (err) {
-      setStatus(err.message || "게임방 데이터 수를 확인하지 못했습니다.");
+      setStatus(err.message || "회원 생성에 실패했습니다.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function loadRoomCount() {
+    if (!authState.user?.uid) {
+      setStatus("로그인 후 방 데이터를 확인할 수 있습니다.");
+      return;
+    }
+    setBusy(true);
+    setStatus("");
+    try {
+      const snapshot = await getDocs(collection(db, "users", authState.user.uid, "rooms"));
+      setRoomCount(snapshot.size);
+      setStatus(`현재 내 계정의 게임방 데이터는 ${snapshot.size}개입니다.`);
+    } catch (err) {
+      setStatus(err.message || "게임방 데이터를 확인하지 못했습니다.");
     } finally {
       setBusy(false);
     }
   }
 
   async function resetGameRooms() {
+    if (!authState.user?.uid) {
+      setStatus("로그인 후 방 데이터를 삭제할 수 있습니다.");
+      return;
+    }
     if (resetConfirm.trim() !== "초기화") {
       setStatus("삭제하려면 확인 입력칸에 '초기화'를 입력하세요.");
       return;
@@ -137,7 +146,7 @@ export default function SettingsPage() {
     setBusy(true);
     setStatus("");
     try {
-      const snapshot = await getDocs(collection(db, "rooms"));
+      const snapshot = await getDocs(collection(db, "users", authState.user.uid, "rooms"));
       let deleted = 0;
       let batch = writeBatch(db);
       let batchCount = 0;
@@ -154,7 +163,7 @@ export default function SettingsPage() {
       if (batchCount > 0) await batch.commit();
       setRoomCount(0);
       setResetConfirm("");
-      setStatus(`게임방 데이터 ${deleted}개를 삭제했습니다. appSettings 설정 문서는 유지했습니다.`);
+      setStatus(`게임방 데이터 ${deleted}개를 삭제했습니다.`);
     } catch (err) {
       setStatus(err.message || "게임방 데이터 삭제에 실패했습니다.");
     } finally {
@@ -168,13 +177,6 @@ export default function SettingsPage() {
       defaultRoomTitle: DEFAULT_APP_SETTINGS.defaultRoomTitle,
       landing: DEFAULT_APP_SETTINGS.landing
     }));
-    setFeatureText(listToLines(DEFAULT_APP_SETTINGS.landing.featureButtons));
-    setFlowText(listToLines(DEFAULT_APP_SETTINGS.landing.flowSteps));
-    setValueText(valueItemsToText(DEFAULT_APP_SETTINGS.landing.valueItems));
-    setStatText(valueItemsToText(DEFAULT_APP_SETTINGS.landing.statItems));
-    setFeatureItemText(valueItemsToText(DEFAULT_APP_SETTINGS.landing.featureItems));
-    setUseCaseText(DEFAULT_APP_SETTINGS.landing.useCases.map((item) => `${item.title} | ${item.description} | ${item.quote || ""}`).join("\n"));
-    setFaqText(valueItemsToText(DEFAULT_APP_SETTINGS.landing.faqs));
   }
 
   if (loading) return <div className="settings-page">설정을 불러오는 중입니다.</div>;
@@ -202,7 +204,7 @@ export default function SettingsPage() {
         <div>
           <p>Admin Only</p>
           <h1>관리자 설정</h1>
-          <span>이 페이지의 저장값은 Firebase `appSettings/global`에 기록됩니다.</span>
+          <span>회원 리스트와 메인 화면 기본 설정을 관리합니다.</span>
         </div>
         <Link to="/">메인으로 돌아가기</Link>
       </header>
@@ -212,164 +214,57 @@ export default function SettingsPage() {
 
       <div className="settings-grid">
         <section className="settings-panel">
-          <h2><KeyRound size={20} /> 관리자 및 접속</h2>
-          <p className="settings-help">Gemini API 키는 보안상 이 화면에서 관리하지 않습니다. 배포 환경변수 `GEMINI_API_KEY`로만 설정하세요.</p>
+          <h2><KeyRound size={20} /> 교사 회원 관리</h2>
+          <p className="settings-help">회원가입한 계정과 관리자가 생성한 계정을 리스트로 확인합니다.</p>
+          {!authState.loggedIn && <p className="settings-status settings-status-error">회원 생성은 로그인 후 사용할 수 있습니다.</p>}
+          <label>id</label>
+          <input value={managedForm.id} onChange={(event) => updateManagedField("id", event.target.value)} disabled={!authState.loggedIn || busy} />
+          <label>pw</label>
+          <input type="password" value={managedForm.password} onChange={(event) => updateManagedField("password", event.target.value)} disabled={!authState.loggedIn || busy} />
+          <p className="settings-help">비밀번호는 8자리 이상(영문, 숫자, 특수문자 허용)</p>
+          <label>이메일 주소</label>
+          <input type="email" value={managedForm.email} onChange={(event) => updateManagedField("email", event.target.value)} disabled={!authState.loggedIn || busy} />
+          <button type="button" className="settings-secondary-button" onClick={createManagedUser} disabled={!authState.loggedIn || busy}>회원 직권 생성</button>
 
-          <label>관리자 비밀번호</label>
-          <input value={form.adminPasscode || ""} onChange={(event) => updateField("adminPasscode", event.target.value)} placeholder="관리자 비밀번호" />
-
-          <label>기본 방 제목</label>
-          <input value={form.defaultRoomTitle || ""} onChange={(event) => updateField("defaultRoomTitle", event.target.value)} />
-
-          <label>로컬 학생 접속 호스트</label>
-          <input value={form.studentOriginHost || ""} onChange={(event) => updateField("studentOriginHost", event.target.value)} placeholder="예: 192.168.0.190" />
-          <p className="settings-help">교사용 PC가 localhost로 열렸을 때 학생 QR 주소에 사용할 IP입니다.</p>
+          <div className="managed-user-list">
+            {teacherUsers.map((item) => (
+              <article key={item.uid || item.id}>
+                <strong>{item.id || "-"}</strong>
+                <span>{item.email || item.authEmail || "-"}</span>
+                <code>{item.password ? `pw: ${item.password}` : "pw: 보안상 표시되지 않음"}</code>
+              </article>
+            ))}
+            {teacherUsers.length === 0 && <p className="settings-help">아직 확인 가능한 회원이 없습니다.</p>}
+          </div>
         </section>
 
         <section className="settings-panel">
-          <h2><Settings size={20} /> 메인 홈페이지 텍스트</h2>
-          <label>상단 이미지 대체 텍스트</label>
-          <input value={form.landing.heroAlt || ""} onChange={(event) => updateLandingField("heroAlt", event.target.value)} />
+          <h2><Settings size={20} /> 기본 설정</h2>
+          <label>관리자 비밀번호</label>
+          <input value={form.adminPasscode || ""} onChange={(event) => updateField("adminPasscode", event.target.value)} />
+          <label>기본 방 제목</label>
+          <input value={form.defaultRoomTitle || ""} onChange={(event) => updateField("defaultRoomTitle", event.target.value)} />
+          <label>학생 접속 호스트</label>
+          <input value={form.studentOriginHost || ""} onChange={(event) => updateField("studentOriginHost", event.target.value)} />
           <label>브랜드명</label>
           <input value={form.landing.brandName || ""} onChange={(event) => updateLandingField("brandName", event.target.value)} />
-          <label>히어로 배지 문구</label>
-          <input value={form.landing.heroBadge || ""} onChange={(event) => updateLandingField("heroBadge", event.target.value)} />
           <label>히어로 제목</label>
           <input value={form.landing.heroTitle || ""} onChange={(event) => updateLandingField("heroTitle", event.target.value)} />
           <label>히어로 설명</label>
-          <textarea value={form.landing.heroDescription || ""} onChange={(event) => updateLandingField("heroDescription", event.target.value)} rows={3} />
-          <div className="settings-two-col">
-            <div>
-              <label>시작 버튼</label>
-              <input value={form.landing.startLink || ""} onChange={(event) => updateLandingField("startLink", event.target.value)} />
-            </div>
-            <div>
-              <label>흐름 버튼</label>
-              <input value={form.landing.flowLink || ""} onChange={(event) => updateLandingField("flowLink", event.target.value)} />
-            </div>
-          </div>
-          <label>섹션 작은 문구</label>
-          <input value={form.landing.sectionEyebrow || ""} onChange={(event) => updateLandingField("sectionEyebrow", event.target.value)} />
-          <label>섹션 제목</label>
-          <input value={form.landing.sectionTitle || ""} onChange={(event) => updateLandingField("sectionTitle", event.target.value)} />
-          <label>소개 작은 문구</label>
-          <input value={form.landing.introEyebrow || ""} onChange={(event) => updateLandingField("introEyebrow", event.target.value)} />
-          <label>소개 제목</label>
-          <input value={form.landing.introTitle || ""} onChange={(event) => updateLandingField("introTitle", event.target.value)} />
-          <label>소개 강조 문구</label>
-          <input value={form.landing.introQuote || ""} onChange={(event) => updateLandingField("introQuote", event.target.value)} />
-          <label>소개 본문</label>
-          <textarea value={form.landing.introBody || ""} onChange={(event) => updateLandingField("introBody", event.target.value)} rows={4} />
-          <div className="settings-two-col">
-            <div>
-              <label>교사용 카드 제목</label>
-              <input value={form.landing.teacherTitle || ""} onChange={(event) => updateLandingField("teacherTitle", event.target.value)} />
-            </div>
-            <div>
-              <label>학생용 카드 제목</label>
-              <input value={form.landing.studentTitle || ""} onChange={(event) => updateLandingField("studentTitle", event.target.value)} />
-            </div>
-          </div>
-          <label>교사용 카드 설명</label>
-          <input value={form.landing.teacherDescription || ""} onChange={(event) => updateLandingField("teacherDescription", event.target.value)} />
-          <label>학생용 카드 설명</label>
-          <input value={form.landing.studentDescription || ""} onChange={(event) => updateLandingField("studentDescription", event.target.value)} />
-          <div className="settings-two-col">
-            <div>
-              <label>방 제목 라벨</label>
-              <input value={form.landing.roomTitleLabel || ""} onChange={(event) => updateLandingField("roomTitleLabel", event.target.value)} />
-            </div>
-            <div>
-              <label>방 만들기 버튼</label>
-              <input value={form.landing.createButton || ""} onChange={(event) => updateLandingField("createButton", event.target.value)} />
-            </div>
-          </div>
-          <div className="settings-two-col">
-            <div>
-              <label>방 코드 라벨</label>
-              <input value={form.landing.joinCodeLabel || ""} onChange={(event) => updateLandingField("joinCodeLabel", event.target.value)} />
-            </div>
-            <div>
-              <label>입장 버튼</label>
-              <input value={form.landing.joinButton || ""} onChange={(event) => updateLandingField("joinButton", event.target.value)} />
-            </div>
-          </div>
-          <label>방 코드 입력 예시</label>
-          <input value={form.landing.joinPlaceholder || ""} onChange={(event) => updateLandingField("joinPlaceholder", event.target.value)} />
-        </section>
-
-        <section className="settings-panel">
-          <h2>홈페이지 목록 문구</h2>
-          <label>상단 지표 목록</label>
-          <textarea value={statText} onChange={(event) => setStatText(event.target.value)} rows={3} />
-          <label>기능 버튼 목록</label>
-          <textarea value={featureText} onChange={(event) => setFeatureText(event.target.value)} rows={5} />
-          <label>수업 흐름 목록</label>
-          <textarea value={flowText} onChange={(event) => setFlowText(event.target.value)} rows={7} />
-          <label>가치 설명 목록</label>
-          <textarea value={valueText} onChange={(event) => setValueText(event.target.value)} rows={8} />
-          <label>특장점 목록</label>
-          <textarea value={featureItemText} onChange={(event) => setFeatureItemText(event.target.value)} rows={7} />
-          <label>활용 사례 목록</label>
-          <textarea value={useCaseText} onChange={(event) => setUseCaseText(event.target.value)} rows={7} />
-          <label>FAQ 목록</label>
-          <textarea value={faqText} onChange={(event) => setFaqText(event.target.value)} rows={7} />
-          <p className="settings-help">지표/가치/특장점/FAQ는 `제목 | 설명`, 활용 사례는 `제목 | 설명 | 인용문` 형식입니다.</p>
-        </section>
-
-        <section className="settings-panel">
-          <h2>홈페이지 섹션 제목</h2>
-          <label>특장점 작은 문구</label>
-          <input value={form.landing.featureEyebrow || ""} onChange={(event) => updateLandingField("featureEyebrow", event.target.value)} />
-          <label>특장점 제목</label>
-          <input value={form.landing.featureTitle || ""} onChange={(event) => updateLandingField("featureTitle", event.target.value)} />
-          <label>이용 방법 작은 문구</label>
-          <input value={form.landing.processEyebrow || ""} onChange={(event) => updateLandingField("processEyebrow", event.target.value)} />
-          <label>이용 방법 제목</label>
-          <input value={form.landing.processTitle || ""} onChange={(event) => updateLandingField("processTitle", event.target.value)} />
-          <label>이용 방법 설명</label>
-          <input value={form.landing.processDescription || ""} onChange={(event) => updateLandingField("processDescription", event.target.value)} />
-          <label>활용 사례 작은 문구</label>
-          <input value={form.landing.useCaseEyebrow || ""} onChange={(event) => updateLandingField("useCaseEyebrow", event.target.value)} />
-          <label>활용 사례 제목</label>
-          <input value={form.landing.useCaseTitle || ""} onChange={(event) => updateLandingField("useCaseTitle", event.target.value)} />
-          <label>활용 사례 설명</label>
-          <input value={form.landing.useCaseDescription || ""} onChange={(event) => updateLandingField("useCaseDescription", event.target.value)} />
-          <label>FAQ 작은 문구</label>
-          <input value={form.landing.faqEyebrow || ""} onChange={(event) => updateLandingField("faqEyebrow", event.target.value)} />
-          <label>FAQ 제목</label>
-          <input value={form.landing.faqTitle || ""} onChange={(event) => updateLandingField("faqTitle", event.target.value)} />
-          <label>하단 CTA 제목</label>
-          <input value={form.landing.ctaTitle || ""} onChange={(event) => updateLandingField("ctaTitle", event.target.value)} />
-          <label>하단 CTA 설명</label>
-          <textarea value={form.landing.ctaDescription || ""} onChange={(event) => updateLandingField("ctaDescription", event.target.value)} rows={3} />
-          <label>하단 CTA 버튼</label>
-          <input value={form.landing.ctaButton || ""} onChange={(event) => updateLandingField("ctaButton", event.target.value)} />
-        </section>
-
-        <section className="settings-panel">
-          <h2>푸터 및 연락처</h2>
-          <label>푸터 브랜드명</label>
-          <input value={form.landing.footerBrand || ""} onChange={(event) => updateLandingField("footerBrand", event.target.value)} />
-          <label>푸터 문구</label>
-          <input value={form.landing.footerTagline || ""} onChange={(event) => updateLandingField("footerTagline", event.target.value)} />
-          <label>이메일</label>
-          <input value={form.landing.contactEmail || ""} onChange={(event) => updateLandingField("contactEmail", event.target.value)} />
-          <label>전화번호</label>
-          <input value={form.landing.contactPhone || ""} onChange={(event) => updateLandingField("contactPhone", event.target.value)} />
-          <button type="button" className="settings-secondary-button" onClick={resetLandingDefaults}><RotateCcw size={16} /> 홈페이지 문구 기본값으로 되돌리기</button>
+          <textarea value={form.landing.heroDescription || ""} onChange={(event) => updateLandingField("heroDescription", event.target.value)} rows={4} />
+          <button type="button" className="settings-secondary-button" onClick={resetLandingDefaults}><RotateCcw size={16} /> 랜딩 기본값 복원</button>
         </section>
 
         <section className="settings-panel settings-danger-panel">
           <h2><AlertTriangle size={20} /> 게임 데이터 초기화</h2>
-          <p>삭제 대상은 Firebase `rooms` 컬렉션뿐입니다. `appSettings/global` 설정 문서와 앱 동작에 필요한 코드/이미지/설정 파일은 삭제하지 않습니다.</p>
-          <button type="button" className="settings-secondary-button" onClick={loadRoomCount} disabled={busy}>삭제 대상 개수 확인</button>
+          <p>현재 로그인한 교사 계정의 게임방 데이터만 확인하거나 삭제합니다.</p>
+          <button type="button" className="settings-secondary-button" onClick={loadRoomCount} disabled={busy}>방 데이터 개수 확인</button>
           {roomCount !== null && <p className="settings-help">현재 게임방 데이터: {roomCount}개</p>}
           <label>확인 입력</label>
           <input value={resetConfirm} onChange={(event) => setResetConfirm(event.target.value)} placeholder="초기화" />
           <button type="button" className="settings-danger-button" onClick={resetGameRooms} disabled={busy}>
             <Trash2 size={16} />
-            기존 학생 게임 데이터 삭제
+            기존 게임방 데이터 삭제
           </button>
         </section>
       </div>

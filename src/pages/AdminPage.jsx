@@ -44,7 +44,7 @@ import {
   Trash2,
   Users
 } from "lucide-react";
-import { auth, db, doc, getDoc, setDoc, signInAnonymously, updateDoc } from "../firebase.js";
+import { getDoc, setDoc, updateDoc } from "../firebase.js";
 import { BUSINESS_FACTORS, STATUSES, STATUS_LABELS } from "../data/gameData.js";
 import {
   TEAM_BASE_ASSET,
@@ -62,7 +62,8 @@ import {
   rankTeams
 } from "../lib/game.js";
 import { useAppSettings } from "../lib/appSettings.js";
-import { useRoom } from "../hooks/useRoom.js";
+import { roomDocRef, useRoom } from "../hooks/useRoom.js";
+import { loginTeacher, logoutTeacher, registerTeacher, useTeacherAuth } from "../hooks/useTeacherAuth.js";
 import simulationBgm from "../images/bgm01.mp3";
 import heroBackgroundImage from "../images/landing-hero-ai-v2.png";
 import processRoadmapImage from "../images/landing-process-roadmap.png";
@@ -100,7 +101,7 @@ const eventCardImages = Object.fromEntries(
     .filter(([id]) => id)
 );
 
-function LandingPage({ appSettings, roomTitle, setRoomTitle, joinCode, setJoinCode, actionError, creating, createRoom, joinAsStudent }) {
+function LandingPage({ appSettings, roomTitle, setRoomTitle, joinCode, setJoinCode, actionError, creating, createRoom, joinAsStudent, authState, onOpenAuth }) {
   const landing = appSettings.landing;
   const [quickStartTab, setQuickStartTab] = useState("teacher");
   const navTargets = ["intro", "features", "class-flow", "cases", "faq"];
@@ -120,6 +121,7 @@ function LandingPage({ appSettings, roomTitle, setRoomTitle, joinCode, setJoinCo
             <a key={`${label}-${index}`} href={`#${navTargets[index] || "quick-start"}`}>{label}</a>
           ))}
         </div>
+        <AuthBar authState={authState} onOpenAuth={onOpenAuth} />
       </nav>
 
       <header id="top" className="landing-hero" style={{ "--landing-hero-image": `url(${heroBackgroundImage})` }}>
@@ -325,10 +327,94 @@ function LandingPage({ appSettings, roomTitle, setRoomTitle, joinCode, setJoinCo
   );
 }
 
+function AuthBar({ authState, onOpenAuth }) {
+  async function handleLogout() {
+    await logoutTeacher();
+    window.alert("정상적으로 로그아웃 되었습니다");
+  }
+
+  if (authState?.loggedIn) {
+    return (
+      <div className="teacher-auth-badge">
+        <span>{authState.teacherId || authState.user?.displayName || "teacher"}</span>
+        <button type="button" onClick={handleLogout}>로그아웃</button>
+      </div>
+    );
+  }
+  return (
+    <div className="teacher-auth-actions">
+      <button type="button" onClick={() => onOpenAuth("login")}>로그인</button>
+      <button type="button" onClick={() => onOpenAuth("signup")}>회원가입</button>
+    </div>
+  );
+}
+
+function AuthModal({ mode, onClose }) {
+  const [modalMode, setModalMode] = useState(mode);
+  const [form, setForm] = useState({ id: "", email: "", password: "" });
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const isSignup = modalMode === "signup";
+
+  function update(key, value) {
+    setForm((current) => ({ ...current, [key]: value }));
+  }
+
+  async function submit(event) {
+    event.preventDefault();
+    setBusy(true);
+    setMessage("");
+    try {
+      if (isSignup) {
+        await registerTeacher(form);
+        await logoutTeacher();
+        window.alert("회원가입 완료! 이제 비트퀘스트의 팀원이 되었습니다.");
+        onClose();
+        window.location.href = "/";
+      } else {
+        await loginTeacher(form.id, form.password);
+        onClose();
+      }
+    } catch (err) {
+      setMessage(err.message || "처리 중 오류가 발생했습니다.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return createPortal((
+    <div className="auth-modal-backdrop">
+      <form className="auth-modal" onSubmit={submit} onClick={(event) => event.stopPropagation()}>
+        <button type="button" className="auth-modal-close" onClick={onClose}>닫기</button>
+        <p>{isSignup ? "Teacher Sign Up" : "Teacher Login"}</p>
+        <h2>{isSignup ? "회원가입" : "로그인"}</h2>
+        <div className="auth-mode-buttons">
+          <button type="button" className={!isSignup ? "active" : ""} onClick={() => setModalMode("login")}>로그인</button>
+          <button type="button" className={isSignup ? "active" : ""} onClick={() => setModalMode("signup")}>회원가입</button>
+        </div>
+        <label>id</label>
+        <input value={form.id} onChange={(event) => update("id", event.target.value)} autoFocus />
+        <label>pw</label>
+        <input type="password" value={form.password} onChange={(event) => update("password", event.target.value)} />
+        {isSignup && (
+          <>
+            <p className="auth-password-help">비밀번호는 8자리 이상(영문, 숫자, 특수문자 허용)</p>
+            <label>이메일주소</label>
+            <input type="email" value={form.email} onChange={(event) => update("email", event.target.value)} />
+          </>
+        )}
+        {message && <div className="auth-message auth-error">{message}</div>}
+        <button type="submit" disabled={busy}>{busy ? "처리 중..." : isSignup ? "회원가입" : "로그인"}</button>
+      </form>
+    </div>
+  ), document.body);
+}
+
 export default function AdminPage() {
   const { roomId } = useParams();
   const navigate = useNavigate();
-  const { room, loading, error } = useRoom(roomId);
+  const authState = useTeacherAuth();
+  const { room, loading, error } = useRoom(roomId, authState.user?.uid);
   const { settings: appSettings } = useAppSettings();
   const [roomTitle, setRoomTitle] = useState("스타트업 히어로");
   const [joinCode, setJoinCode] = useState("");
@@ -342,6 +428,7 @@ export default function AdminPage() {
   const [aiConfirmOpen, setAiConfirmOpen] = useState(false);
   const [evaluating, setEvaluating] = useState(false);
   const [simulationRunning, setSimulationRunning] = useState(false);
+  const [authModal, setAuthModal] = useState(null);
   const intervalRef = useRef(null);
   const bgmRef = useRef(null);
   const resultBoardRef = useRef(null);
@@ -391,7 +478,7 @@ export default function AdminPage() {
     bgmRef.current.currentTime = 0;
   }
 
-  const studentUrl = roomId ? `${getStudentOrigin(appSettings.studentOriginHost)}/room/${roomId}` : "";
+  const studentUrl = roomId ? `${getStudentOrigin(appSettings.studentOriginHost)}/room/${roomId}?owner=${encodeURIComponent(authState.user?.uid || "")}` : "";
   const students = room?.students || {};
   const teams = room?.teams || {};
   const rankedTeams = useMemo(() => rankTeams(teams), [teams]);
@@ -401,14 +488,22 @@ export default function AdminPage() {
   const allPlansSubmitted = activeTeamEntries.length > 0 && activeTeamEntries.every(([, team]) => team.idea && team.ideaSubmitted !== false);
   const allTeamsEvaluated = activeTeamEntries.length > 0 && activeTeamEntries.every(([, team]) => team.aiEvaluation);
   const investmentChartVisible = [STATUSES.INVESTMENT, STATUSES.SIMULATION, STATUSES.RESULT].includes(room?.status);
+  const currentRoomRef = () => roomDocRef(authState.user.uid, roomId);
 
   async function createRoom() {
     setActionError("");
+    if (!authState.loggedIn) {
+      setAuthModal("login");
+      setActionError("로그인 / 회원가입 후 교사용 방 만들기를 사용할 수 있습니다.");
+      return;
+    }
     setCreating(true);
     try {
-      if (!auth.currentUser) await signInAnonymously(auth);
       const nextRoomId = makeRoomId();
-      await setDoc(doc(db, "rooms", nextRoomId), makeInitialRoom(nextRoomId, roomTitle.trim() || appSettings.defaultRoomTitle || "스타트업 히어로"));
+      await setDoc(roomDocRef(authState.user.uid, nextRoomId), {
+        ...makeInitialRoom(nextRoomId, roomTitle.trim() || appSettings.defaultRoomTitle || "스타트업 히어로"),
+        ownerUid: authState.user.uid
+      });
       navigate(`/admin/${nextRoomId}`);
     } catch (err) {
       setActionError(err.message || "방 생성에 실패했습니다.");
@@ -429,27 +524,27 @@ export default function AdminPage() {
         Object.values(students).some((student) => student.team === teamKey)
       );
       if (activeTeams.length === 0) {
-        await updateDoc(doc(db, "rooms", roomId), {
+        await updateDoc(currentRoomRef(), {
           sysMessage: "학생을 팀에 배치한 뒤 다음 단계로 이동할 수 있습니다."
         });
         return;
       }
       const unassignedStudents = Object.values(students).some((student) => !student.team);
       if (unassignedStudents) {
-        await updateDoc(doc(db, "rooms", roomId), {
+        await updateDoc(currentRoomRef(), {
           sysMessage: "대기 중인 학생을 모두 팀에 배치한 뒤 다음 단계로 이동할 수 있습니다."
         });
         return;
       }
       const missingLeader = activeTeams.some(([, team]) => !team.leaderId);
       if (missingLeader) {
-        await updateDoc(doc(db, "rooms", roomId), {
+        await updateDoc(currentRoomRef(), {
           sysMessage: "팀장을 지정하세요. 참가자가 있는 모든 팀에 팀장이 있어야 다음 단계로 이동할 수 있습니다."
         });
         return;
       }
     }
-    await updateDoc(doc(db, "rooms", roomId), {
+    await updateDoc(currentRoomRef(), {
       status,
       sysMessage: `${STATUS_LABELS[status]} 단계로 이동했습니다.`
     });
@@ -478,19 +573,19 @@ export default function AdminPage() {
   async function finalizeResults() {
     if (!roomId) return;
     if (Number(room?.currentMonth || 0) < 24) {
-      await updateDoc(doc(db, "rooms", roomId), {
+      await updateDoc(currentRoomRef(), {
         sysMessage: "24개월 경영 시뮬레이션이 끝난 뒤 최종 결과를 집계할 수 있습니다."
       });
       return;
     }
     stopSimulationBgm();
-    await updateDoc(doc(db, "rooms", roomId), {
+    await updateDoc(currentRoomRef(), {
       resultFinalizing: true,
       simulationRunning: false,
       sysMessage: "최종결과 집계중..."
     });
     window.setTimeout(() => {
-      updateDoc(doc(db, "rooms", roomId), {
+      updateDoc(currentRoomRef(), {
         resultFinalizing: false,
         status: STATUSES.RESULT,
         sysMessage: "최종 결과가 공개되었습니다."
@@ -500,7 +595,7 @@ export default function AdminPage() {
 
   async function setLeader(uid, teamKey) {
     const nickname = students[uid]?.nickname || "학생";
-    await updateDoc(doc(db, "rooms", roomId), {
+    await updateDoc(currentRoomRef(), {
       [`teams.${teamKey}.leaderId`]: uid,
       sysMessage: `${nickname} 학생이 ${teams[teamKey]?.teamName || "팀"} 팀장이 되었습니다.`
     });
@@ -508,7 +603,7 @@ export default function AdminPage() {
 
   async function renameTeam(teamKey, teamName) {
     const fallback = teams[teamKey]?.teamName || "팀";
-    await updateDoc(doc(db, "rooms", roomId), {
+    await updateDoc(currentRoomRef(), {
       [`teams.${teamKey}.teamName`]: normalizeTeamName(teamName.trim() || fallback),
       sysMessage: "팀 이름이 변경되었습니다."
     });
@@ -516,7 +611,7 @@ export default function AdminPage() {
 
   async function addTeam() {
     const key = makeNextTeamKey(teams);
-    await updateDoc(doc(db, "rooms", roomId), {
+    await updateDoc(currentRoomRef(), {
       [`teams.${key}`]: makeTeam(key, Object.keys(teams).length),
       sysMessage: "팀을 추가했습니다."
     });
@@ -534,7 +629,7 @@ export default function AdminPage() {
       ])
     );
 
-    await updateDoc(doc(db, "rooms", roomId), {
+    await updateDoc(currentRoomRef(), {
       teams: nextTeams,
       students: nextStudents,
       sysMessage: `${removedName}이 삭제되어 해당 팀 학생은 대기실로 이동했습니다.`
@@ -543,7 +638,7 @@ export default function AdminPage() {
 
   async function assignStudentToTeam(uid, teamKey) {
     const nickname = students[uid]?.nickname || "학생";
-    await updateDoc(doc(db, "rooms", roomId), {
+    await updateDoc(currentRoomRef(), {
       [`students.${uid}.team`]: teamKey,
       sysMessage: `${nickname} 학생을 ${teams[teamKey]?.teamName || "팀"}에 배정했습니다.`
     });
@@ -558,7 +653,7 @@ export default function AdminPage() {
       key,
       team.leaderId === uid ? { ...team, leaderId: null } : team
     ]));
-    await updateDoc(doc(db, "rooms", roomId), {
+    await updateDoc(currentRoomRef(), {
       students: nextStudents,
       teams: nextTeams,
       sysMessage: `${nickname} 학생을 대기실에서 내보냈습니다.`
@@ -573,7 +668,7 @@ export default function AdminPage() {
       key,
       previousTeam === key && team.leaderId === uid ? { ...team, leaderId: null } : team
     ]));
-    await updateDoc(doc(db, "rooms", roomId), {
+    await updateDoc(currentRoomRef(), {
       [`students.${uid}.team`]: teamKey,
       teams: nextTeams,
       sysMessage: `${nickname} 학생을 ${teams[teamKey]?.teamName || "팀"}으로 이동했습니다.`
@@ -582,7 +677,7 @@ export default function AdminPage() {
   }
 
   async function lockBusinessPlan(teamKey) {
-    await updateDoc(doc(db, "rooms", roomId), {
+    await updateDoc(currentRoomRef(), {
       [`teams.${teamKey}.ideaLocked`]: true,
       sysMessage: `${teams[teamKey]?.teamName || "팀"} 사업계획을 확정했습니다. 학생 화면에서 더 이상 수정할 수 없습니다.`
     });
@@ -591,14 +686,14 @@ export default function AdminPage() {
   async function evaluateBusinessPlans() {
     if (!roomId || evaluating) return;
     if (!allPlansSubmitted) {
-      await updateDoc(doc(db, "rooms", roomId), {
+      await updateDoc(currentRoomRef(), {
         sysMessage: "모든 팀의 사업계획서가 등록되어야 AI 평가를 시작할 수 있습니다."
       });
       return;
     }
     setEvaluating(true);
     try {
-      await updateDoc(doc(db, "rooms", roomId), {
+      await updateDoc(currentRoomRef(), {
         status: STATUSES.AI_EVALUATION,
         aiEvaluationStatus: "evaluating",
         sysMessage: "지금 모두의 사업계획을 비즈니스 전문 AI가 평가중입니다..."
@@ -615,14 +710,14 @@ export default function AdminPage() {
         key,
         evaluations[key] ? { ...team, aiEvaluation: evaluations[key] } : team
       ]));
-      await updateDoc(doc(db, "rooms", roomId), {
+      await updateDoc(currentRoomRef(), {
         teams: nextTeams,
         aiEvaluationStatus: "done",
         status: STATUSES.AI_EVALUATION,
         sysMessage: `${makeAiEvaluationMessage(evaluations)} 교사가 투자 유치 단계를 누르면 다음 단계로 이동합니다.`
       });
     } catch (err) {
-      await updateDoc(doc(db, "rooms", roomId), {
+      await updateDoc(currentRoomRef(), {
         aiEvaluationStatus: "error",
         status: STATUSES.AI_EVALUATION,
         sysMessage: `AI 평가에 실패했습니다. ${err.message || "잠시 후 다시 시도하세요."}`
@@ -637,7 +732,7 @@ export default function AdminPage() {
       const base = TEAM_BASE_ASSET + Number(team.investmentsReceived || 0);
       return [key, { ...team, initialCapital: base, currentAsset: base, midDecision: null, lastEventImpact: null, assetHistory: [{ month: 0, asset: base }] }];
     }));
-    await updateDoc(doc(db, "rooms", roomId), {
+    await updateDoc(currentRoomRef(), {
       teams: nextTeams,
       currentMonth: 0,
       currentEvent: null,
@@ -654,14 +749,14 @@ export default function AdminPage() {
   async function runSimulation(startMonth = 0, speed = "normal") {
     if (!roomId || intervalRef.current) return;
     if (!allTeamsEvaluated) {
-      await updateDoc(doc(db, "rooms", roomId), {
+      await updateDoc(currentRoomRef(), {
         sysMessage: "먼저 모든 팀의 AI 평가를 완료해야 경영 시뮬레이션을 시작할 수 있습니다."
       });
       return;
     }
     if (startMonth === 0) await initializeAssets();
     if (startMonth > 0) {
-      await updateDoc(doc(db, "rooms", roomId), {
+      await updateDoc(currentRoomRef(), {
         simulationRunning: true,
         sysMessage: `${startMonth}개월 차부터 경영 시뮬레이션을 재개합니다.`
       });
@@ -672,7 +767,7 @@ export default function AdminPage() {
 
     async function advanceOneMonth() {
       month += 1;
-      const freshSnap = await getDoc(doc(db, "rooms", roomId));
+      const freshSnap = await getDoc(currentRoomRef());
       if (!freshSnap.exists()) return;
       const freshRoom = freshSnap.data();
 
@@ -684,7 +779,7 @@ export default function AdminPage() {
       const eventPreviewTeams = Object.fromEntries(
         Object.entries(freshRoom.teams || {}).map(([key, team]) => [key, { ...team, lastEventImpact: null }])
       );
-      await updateDoc(doc(db, "rooms", roomId), {
+      await updateDoc(currentRoomRef(), {
         teams: eventPreviewTeams,
         currentMonth: month,
         currentEvent: event,
@@ -697,7 +792,7 @@ export default function AdminPage() {
       });
 
       window.setTimeout(async () => {
-        const applySnap = await getDoc(doc(db, "rooms", roomId));
+        const applySnap = await getDoc(currentRoomRef());
         if (!applySnap.exists()) return;
         const applyRoom = applySnap.data();
         if (Number(applyRoom.currentMonth || 0) !== month || applyRoom.currentEvent?.id !== event.id) return;
@@ -710,7 +805,7 @@ export default function AdminPage() {
             return [key, { ...updated, assetHistory: [...history, { month, asset: updated.currentAsset }] }];
           })
         );
-        await updateDoc(doc(db, "rooms", roomId), {
+        await updateDoc(currentRoomRef(), {
           teams: nextTeams,
           simulationRunning: month < 24,
           sysMessage: month >= 24 ? "24개월 경영 시뮬레이션이 종료되었습니다. 교사가 최종 결과 버튼을 누르면 결과가 공개됩니다." : `${month}개월 차 이벤트 자산 변동이 반영되었습니다.`
@@ -739,7 +834,7 @@ export default function AdminPage() {
     setSimulationRunning(false);
     pauseSimulationBgm();
     if (roomId) {
-      updateDoc(doc(db, "rooms", roomId), {
+      updateDoc(currentRoomRef(), {
         simulationRunning: false,
         sysMessage: "AI 경영 시뮬레이션을 일시정지했습니다."
       });
@@ -768,7 +863,7 @@ export default function AdminPage() {
         }
       ];
     }));
-    await updateDoc(doc(db, "rooms", roomId), {
+    await updateDoc(currentRoomRef(), {
       teams: nextTeams,
       currentDecision: null,
       sysMessage: "긴급 의사결정 결과를 반영했습니다. 시뮬레이션을 계속합니다."
@@ -777,7 +872,10 @@ export default function AdminPage() {
   }
 
   async function resetRoom() {
-    await setDoc(doc(db, "rooms", roomId), makeInitialRoom(roomId, room?.roomTitle || appSettings.defaultRoomTitle || "스타트업 히어로"));
+    await setDoc(currentRoomRef(), {
+      ...makeInitialRoom(roomId, room?.roomTitle || appSettings.defaultRoomTitle || "스타트업 히어로"),
+      ownerUid: authState.user.uid
+    });
   }
 
   async function requestAiEvaluation(team) {
@@ -833,17 +931,22 @@ export default function AdminPage() {
 
   if (!roomId) {
     return (
-      <LandingPage
-        appSettings={appSettings}
-        roomTitle={roomTitle}
-        setRoomTitle={setRoomTitle}
-        joinCode={joinCode}
-        setJoinCode={setJoinCode}
-        actionError={actionError}
-        creating={creating}
-        createRoom={createRoom}
-        joinAsStudent={joinAsStudent}
-      />
+      <>
+        <LandingPage
+          appSettings={appSettings}
+          roomTitle={roomTitle}
+          setRoomTitle={setRoomTitle}
+          joinCode={joinCode}
+          setJoinCode={setJoinCode}
+          actionError={actionError}
+          creating={creating}
+          createRoom={createRoom}
+          joinAsStudent={joinAsStudent}
+          authState={authState}
+          onOpenAuth={setAuthModal}
+        />
+        {authModal && <AuthModal mode={authModal} onClose={() => setAuthModal(null)} />}
+      </>
     );
   }
 
@@ -1661,4 +1764,5 @@ function playWhoosh() {
     // Browser autoplay policies can block audio until the user interacts.
   }
 }
+
 

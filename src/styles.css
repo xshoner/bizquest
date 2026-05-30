@@ -571,6 +571,183 @@ select {
   color: #175cff;
 }
 
+.teacher-auth-actions,
+.teacher-auth-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.teacher-auth-actions button,
+.teacher-auth-badge button {
+  border: 0;
+  border-radius: 10px;
+  background: #eef4ff;
+  padding: 9px 12px;
+  color: #175cff;
+  font-size: 13px;
+  font-weight: 1000;
+}
+
+.teacher-auth-badge {
+  border-radius: 999px;
+  background: #061336;
+  padding: 5px 6px 5px 13px;
+  color: white;
+  font-size: 13px;
+  font-weight: 1000;
+}
+
+.teacher-auth-badge button {
+  background: rgba(255, 255, 255, 0.16);
+  color: white;
+}
+
+.auth-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: grid;
+  place-items: center;
+  background: rgba(15, 23, 42, 0.45);
+  padding: 18px;
+  backdrop-filter: blur(8px);
+}
+
+.auth-modal {
+  position: relative;
+  display: grid;
+  width: min(100%, 420px);
+  gap: 10px;
+  border-radius: 18px;
+  background: white;
+  padding: 26px;
+  box-shadow: 0 28px 80px rgba(15, 23, 42, 0.24);
+}
+
+.auth-modal p {
+  margin: 0;
+  color: #175cff;
+  font-size: 12px;
+  font-weight: 1000;
+}
+
+.auth-modal h2 {
+  margin: 0 0 4px;
+  color: #061336;
+  font-size: 28px;
+  font-weight: 1000;
+}
+
+.auth-modal label {
+  color: #334155;
+  font-size: 12px;
+  font-weight: 1000;
+}
+
+.auth-mode-buttons {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  border-radius: 12px;
+  background: #eef4ff;
+  padding: 6px;
+}
+
+.auth-mode-buttons button {
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  padding: 10px;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 1000;
+}
+
+.auth-mode-buttons button.active {
+  background: white;
+  color: #175cff;
+  box-shadow: 0 8px 18px rgba(30, 64, 175, 0.12);
+}
+
+.auth-modal input {
+  border: 1px solid #dbe3ee;
+  border-radius: 10px;
+  padding: 12px 13px;
+  outline: none;
+}
+
+.auth-password-help {
+  margin: -2px 0 0 !important;
+  color: #64748b !important;
+  font-size: 12px !important;
+  font-weight: 850 !important;
+}
+
+.auth-modal > button[type="submit"] {
+  border: 0;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #175cff, #14b8a6);
+  padding: 13px 16px;
+  color: white;
+  font-weight: 1000;
+}
+
+.auth-modal-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  border: 0;
+  border-radius: 999px;
+  background: #f1f5f9;
+  padding: 8px 10px;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 1000;
+}
+
+.auth-message {
+  border-radius: 10px;
+  background: #ecfdf5;
+  padding: 10px 12px;
+  color: #047857;
+  font-size: 13px;
+  font-weight: 1000;
+}
+
+.auth-error {
+  background: #fff1f2;
+  color: #be123c;
+}
+
+.managed-user-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.managed-user-list article {
+  display: grid;
+  gap: 3px;
+  border: 1px solid #dbe3ee;
+  border-radius: 10px;
+  background: #f8fafc;
+  padding: 10px 12px;
+}
+
+.managed-user-list strong {
+  color: #0f172a;
+  font-weight: 1000;
+}
+
+.managed-user-list span,
+.managed-user-list code {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 850;
+}
+
 .landing-hero {
   position: relative;
   display: grid;
@@ -3061,7 +3238,7 @@ select {
   inset: 0;
   z-index: 9999;
   display: grid;
-  place-items: start end;
+  place-items: center;
   padding: clamp(18px, 4vw, 44px);
   background: rgba(15, 23, 42, 0.22);
   backdrop-filter: blur(5px);
@@ -3069,11 +3246,11 @@ select {
 
 .qr-popover {
   position: relative;
-  width: min(100%, 460px);
+  width: min(100%, 620px);
   border: 1px solid rgba(15, 23, 42, 0.10);
   border-radius: 18px;
   background: white;
-  padding: 24px;
+  padding: clamp(24px, 4vw, 38px);
   text-align: center;
   box-shadow: 0 28px 88px rgba(15, 23, 42, 0.28);
   animation: event-pop 220ms ease-out;
@@ -3093,8 +3270,9 @@ select {
 }
 
 .qr-popover svg {
+  width: min(76vw, 500px);
+  height: min(76vw, 500px);
   max-width: 100%;
-  height: auto;
 }
 
 .result-fireworks {
