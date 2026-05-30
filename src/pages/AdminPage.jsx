@@ -384,7 +384,7 @@ function AuthModal({ mode, onClose }) {
 
   return createPortal((
     <div className="auth-modal-backdrop">
-      <form className="auth-modal" onSubmit={submit} onClick={(event) => event.stopPropagation()}>
+      <form className="auth-modal" onSubmit={submit} onClick={(event) => event.stopPropagation()} autoComplete="off">
         <button type="button" className="auth-modal-close" onClick={onClose}>닫기</button>
         <p>{isSignup ? "Teacher Sign Up" : "Teacher Login"}</p>
         <h2>{isSignup ? "회원가입" : "로그인"}</h2>
@@ -393,14 +393,32 @@ function AuthModal({ mode, onClose }) {
           <button type="button" className={isSignup ? "active" : ""} onClick={() => setModalMode("signup")}>회원가입</button>
         </div>
         <label>id</label>
-        <input value={form.id} onChange={(event) => update("id", event.target.value)} autoFocus />
+        <input
+          value={form.id}
+          onChange={(event) => update("id", event.target.value)}
+          autoFocus
+          autoComplete="off"
+          name={isSignup ? "signup-teacher-id" : "login-teacher-id"}
+        />
         <label>pw</label>
-        <input type="password" value={form.password} onChange={(event) => update("password", event.target.value)} />
+        <input
+          type="password"
+          value={form.password}
+          onChange={(event) => update("password", event.target.value)}
+          autoComplete={isSignup ? "new-password" : "off"}
+          name={isSignup ? "signup-teacher-password" : "login-teacher-password"}
+        />
         {isSignup && (
           <>
             <p className="auth-password-help">비밀번호는 8자리 이상(영문, 숫자, 특수문자 허용)</p>
             <label>이메일주소</label>
-            <input type="email" value={form.email} onChange={(event) => update("email", event.target.value)} />
+            <input
+              type="email"
+              value={form.email}
+              onChange={(event) => update("email", event.target.value)}
+              autoComplete="email"
+              name="signup-teacher-email"
+            />
           </>
         )}
         {message && <div className="auth-message auth-error">{message}</div>}

@@ -725,15 +725,26 @@ select {
   display: grid;
   gap: 8px;
   margin-top: 8px;
+  max-height: 520px;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 
 .managed-user-list article {
-  display: grid;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 3px;
   border: 1px solid #dbe3ee;
   border-radius: 10px;
   background: #f8fafc;
   padding: 10px 12px;
+}
+
+.managed-user-list article > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
 }
 
 .managed-user-list strong {
@@ -746,6 +757,17 @@ select {
   color: #64748b;
   font-size: 12px;
   font-weight: 850;
+}
+
+.managed-user-list article button {
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 8px;
+  background: #fee2e2;
+  padding: 8px 10px;
+  color: #b91c1c;
+  font-size: 12px;
+  font-weight: 1000;
 }
 
 .landing-hero {

@@ -180,11 +180,10 @@ export async function createManagedTeacher(adminUser, payload) {
       email: String(payload.email).trim(),
       authEmail: idToAuthEmail(teacherId),
       createdBy: adminUser.uid,
-      createdAt: Date.now(),
-      password: payload.password
+      createdAt: Date.now()
     };
     await setDoc(doc(db, "users", adminUser.uid, "managedUsers", credential.user.uid), profile);
-    await writeTeacherRegistry(profile);
+    await writeTeacherRegistry(profile).catch(() => null);
     rememberTeacher(profile);
     return { user: credential.user, profile };
   } catch (err) {

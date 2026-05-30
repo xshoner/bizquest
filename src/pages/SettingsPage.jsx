@@ -1,23 +1,23 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { AlertTriangle, KeyRound, RotateCcw, Save, Settings, Trash2 } from "lucide-react";
-import { collection, db, doc, getDocs, setDoc, writeBatch } from "../firebase.js";
+import { collection, db, deleteDoc, doc, getDocs, setDoc, writeBatch } from "../firebase.js";
 import { createManagedTeacher, readLocalTeacherRegistry, useTeacherAuth } from "../hooks/useTeacherAuth.js";
 import { APP_SETTINGS_PATH, DEFAULT_APP_SETTINGS, LOCAL_APP_SETTINGS_KEY, mergeAppSettings, useAppSettings } from "../lib/appSettings.js";
 
 function uniqueUsers(items) {
   const map = new Map();
   for (const item of items) {
-    if (!item?.id && !item?.uid) continue;
-    map.set(item.uid || item.id, item);
+    const key = item?.uid || item?.id;
+    if (!key) continue;
+    map.set(key, item);
   }
   return [...map.values()].sort((a, b) => Number(b.createdAt || b.savedAt || 0) - Number(a.createdAt || a.savedAt || 0));
 }
 
 function displayEmail(item) {
   const email = String(item?.email || "").trim();
-  if (email && !email.endsWith("@bizquest.local")) return email;
-  return "-";
+  return email && !email.endsWith("@bizquest.local") ? email : "-";
 }
 
 export default function SettingsPage() {
@@ -35,7 +35,10 @@ export default function SettingsPage() {
   const [localUsers, setLocalUsers] = useState(() => readLocalTeacherRegistry());
   const [managedForm, setManagedForm] = useState({ id: "", password: "", email: "" });
 
-  const teacherUsers = useMemo(() => uniqueUsers([...registryUsers, ...managedUsers, ...localUsers]), [localUsers, managedUsers, registryUsers]);
+  const teacherUsers = useMemo(
+    () => uniqueUsers([...registryUsers, ...managedUsers, ...localUsers]),
+    [localUsers, managedUsers, registryUsers]
+  );
 
   useEffect(() => {
     setForm(mergeAppSettings(settings));
@@ -86,17 +89,26 @@ export default function SettingsPage() {
   }
 
   async function loadTeacherUsers() {
+    const nextLocalUsers = readLocalTeacherRegistry();
+    setLocalUsers(nextLocalUsers);
+
     try {
       const registrySnapshot = await getDocs(collection(db, "teacherRegistry"));
       setRegistryUsers(registrySnapshot.docs.map((item) => item.data()));
-      setLocalUsers(readLocalTeacherRegistry());
+    } catch {
+      setRegistryUsers([]);
+      setStatus("공용 회원 목록 권한이 없습니다. Firebase 규칙에서 teacherRegistry 읽기를 허용하세요.");
+    }
 
-      if (authState.user?.uid) {
+    if (authState.user?.uid) {
+      try {
         const managedSnapshot = await getDocs(collection(db, "users", authState.user.uid, "managedUsers"));
         setManagedUsers(managedSnapshot.docs.map((item) => item.data()));
+      } catch {
+        setManagedUsers([]);
       }
-    } catch (err) {
-      setStatus(err.message || "회원 리스트를 불러오지 못했습니다.");
+    } else {
+      setManagedUsers([]);
     }
   }
 
@@ -104,8 +116,11 @@ export default function SettingsPage() {
     setBusy(true);
     setStatus("");
     try {
-      await createManagedTeacher(authState.user, managedForm);
+      const result = await createManagedTeacher(authState.user, managedForm);
       setManagedForm({ id: "", password: "", email: "" });
+      setManagedUsers((current) => uniqueUsers([result.profile, ...current]));
+      setRegistryUsers((current) => uniqueUsers([result.profile, ...current]));
+      setLocalUsers(readLocalTeacherRegistry());
       await loadTeacherUsers();
       setStatus("회원을 생성했습니다. 생성한 id/pw로 로그인할 수 있습니다.");
     } catch (err) {
@@ -115,9 +130,33 @@ export default function SettingsPage() {
     }
   }
 
+  async function deleteTeacherInfo(item) {
+    const key = item?.uid || item?.id;
+    if (!key) return;
+    if (!window.confirm(`${item.id || "회원"} 정보를 목록에서 삭제할까요? Firebase Auth 계정 자체는 삭제되지 않습니다.`)) return;
+    setBusy(true);
+    setStatus("");
+    try {
+      if (item.uid) {
+        await deleteDoc(doc(db, "teacherRegistry", item.uid)).catch(() => {});
+        if (authState.user?.uid) {
+          await deleteDoc(doc(db, "users", authState.user.uid, "managedUsers", item.uid)).catch(() => {});
+        }
+      }
+      setRegistryUsers((current) => current.filter((user) => (user.uid || user.id) !== key));
+      setManagedUsers((current) => current.filter((user) => (user.uid || user.id) !== key));
+      setLocalUsers((current) => current.filter((user) => (user.uid || user.id) !== key));
+      setStatus("회원 표시 정보를 삭제했습니다.");
+    } catch (err) {
+      setStatus(err.message || "회원 정보 삭제에 실패했습니다.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function loadRoomCount() {
     if (!authState.user?.uid) {
-      setStatus("로그인 후 방 데이터를 확인할 수 있습니다.");
+      setStatus("로그인 후 데이터를 확인할 수 있습니다.");
       return;
     }
     setBusy(true);
@@ -135,7 +174,7 @@ export default function SettingsPage() {
 
   async function resetGameRooms() {
     if (!authState.user?.uid) {
-      setStatus("로그인 후 방 데이터를 삭제할 수 있습니다.");
+      setStatus("로그인 후 데이터를 삭제할 수 있습니다.");
       return;
     }
     if (resetConfirm.trim() !== "초기화") {
@@ -187,7 +226,13 @@ export default function SettingsPage() {
           <Settings size={34} />
           <h1>관리자 설정</h1>
           <p>설정 페이지 접근을 위해 관리자 비밀번호를 입력하세요.</p>
-          <input type="password" value={passcode} onChange={(event) => setPasscode(event.target.value)} onKeyDown={(event) => event.key === "Enter" && unlock()} placeholder="관리자 비밀번호" />
+          <input
+            type="password"
+            value={passcode}
+            onChange={(event) => setPasscode(event.target.value)}
+            onKeyDown={(event) => event.key === "Enter" && unlock()}
+            placeholder="관리자 비밀번호"
+          />
           <button type="button" onClick={unlock}>접속하기</button>
           {status && <p className="settings-status settings-status-error">{status}</p>}
           {error && <p className="settings-status settings-status-error">{error}</p>}
@@ -219,7 +264,13 @@ export default function SettingsPage() {
           <label>id</label>
           <input value={managedForm.id} onChange={(event) => updateManagedField("id", event.target.value)} disabled={!authState.loggedIn || busy} />
           <label>pw</label>
-          <input type="password" value={managedForm.password} onChange={(event) => updateManagedField("password", event.target.value)} disabled={!authState.loggedIn || busy} />
+          <input
+            type="password"
+            value={managedForm.password}
+            onChange={(event) => updateManagedField("password", event.target.value)}
+            disabled={!authState.loggedIn || busy}
+            autoComplete="new-password"
+          />
           <p className="settings-help">비밀번호는 8자리 이상(영문, 숫자, 특수문자 허용)</p>
           <label>이메일 주소</label>
           <input type="email" value={managedForm.email} onChange={(event) => updateManagedField("email", event.target.value)} disabled={!authState.loggedIn || busy} />
@@ -228,8 +279,11 @@ export default function SettingsPage() {
           <div className="managed-user-list">
             {teacherUsers.map((item) => (
               <article key={item.uid || item.id}>
-                <strong>{item.id || "-"}</strong>
-                <span>{displayEmail(item)}</span>
+                <div>
+                  <strong>{item.id || "-"}</strong>
+                  <span>{displayEmail(item)}</span>
+                </div>
+                <button type="button" onClick={() => deleteTeacherInfo(item)} disabled={busy}>삭제</button>
               </article>
             ))}
             {teacherUsers.length === 0 && <p className="settings-help">아직 확인 가능한 회원이 없습니다.</p>}

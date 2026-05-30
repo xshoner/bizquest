@@ -1,6 +1,7 @@
 import { getApps, initializeApp } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-app.js";
 import {
   collection,
+  deleteDoc,
   doc,
   getDoc,
   getDocs,
@@ -39,6 +40,7 @@ export const secondaryAuth = getAuth(secondaryApp);
 export {
   collection,
   createUserWithEmailAndPassword,
+  deleteDoc,
   doc,
   getDoc,
   getDocs,
