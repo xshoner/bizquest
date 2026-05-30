@@ -42,15 +42,11 @@ function hasTeacherSession() {
 }
 
 function authErrorMessage(err, fallback = "처리 중 오류가 발생했습니다.") {
-  if (err?.code === "auth/email-already-in-use") {
-    return "이미 사용 중인 아이디입니다. 기존 계정이면 로그인하세요.";
-  }
+  if (err?.code === "auth/email-already-in-use") return "이미 사용 중인 아이디입니다. 기존 계정이면 로그인하세요.";
   if (["auth/invalid-credential", "auth/user-not-found", "auth/wrong-password", "auth/invalid-email"].includes(err?.code)) {
     return "아이디 또는 비밀번호가 올바르지 않습니다.";
   }
-  if (err?.code === "auth/weak-password") {
-    return "비밀번호는 8자리 이상으로 입력하세요.";
-  }
+  if (err?.code === "auth/weak-password") return "비밀번호는 8자리 이상으로 입력하세요.";
   return err?.message || fallback;
 }
 
@@ -78,6 +74,19 @@ function rememberTeacher(profile) {
     ...current.filter((item) => item.uid !== profile.uid && item.id !== profile.id)
   ];
   window.localStorage.setItem(TEACHER_REGISTRY_KEY, JSON.stringify(next));
+}
+
+async function writeTeacherRegistry(profile) {
+  const publicProfile = {
+    uid: profile.uid,
+    id: profile.id,
+    email: profile.email || "",
+    authEmail: profile.authEmail || idToAuthEmail(profile.id),
+    createdBy: profile.createdBy || "self",
+    createdAt: profile.createdAt || Date.now()
+  };
+  await setDoc(doc(db, "teacherRegistry", profile.uid), publicProfile, { merge: true });
+  return publicProfile;
 }
 
 export function useTeacherAuth() {
@@ -146,10 +155,9 @@ export async function registerTeacher({ id, email, password, createdBy = "self",
       createdAt: Date.now()
     };
     await setDoc(doc(db, "users", credential.user.uid, "profile", "account"), profile);
+    await writeTeacherRegistry(profile);
     rememberTeacher(profile);
-    if (authInstance === auth) {
-      localStorage.setItem("bizquest-teacher-id", teacherId);
-    }
+    if (authInstance === auth) localStorage.setItem("bizquest-teacher-id", teacherId);
     return { user: credential.user, profile };
   } catch (err) {
     if (authInstance === auth) clearTeacherSession();
@@ -176,6 +184,7 @@ export async function createManagedTeacher(adminUser, payload) {
       password: payload.password
     };
     await setDoc(doc(db, "users", adminUser.uid, "managedUsers", credential.user.uid), profile);
+    await writeTeacherRegistry(profile);
     rememberTeacher(profile);
     return { user: credential.user, profile };
   } catch (err) {

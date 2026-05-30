@@ -30,20 +30,12 @@ export default function SettingsPage() {
   const [busy, setBusy] = useState(false);
   const [roomCount, setRoomCount] = useState(null);
   const [resetConfirm, setResetConfirm] = useState("");
+  const [registryUsers, setRegistryUsers] = useState([]);
   const [managedUsers, setManagedUsers] = useState([]);
   const [localUsers, setLocalUsers] = useState(() => readLocalTeacherRegistry());
   const [managedForm, setManagedForm] = useState({ id: "", password: "", email: "" });
 
-  const teacherUsers = useMemo(() => {
-    const current = authState.user ? [{
-      uid: authState.user.uid,
-      id: authState.teacherId || authState.user.displayName || "",
-      email: "",
-      createdBy: "current",
-      savedAt: Date.now()
-    }] : [];
-    return uniqueUsers([...managedUsers, ...localUsers, ...current]);
-  }, [authState.teacherId, authState.user, localUsers, managedUsers]);
+  const teacherUsers = useMemo(() => uniqueUsers([...registryUsers, ...managedUsers, ...localUsers]), [localUsers, managedUsers, registryUsers]);
 
   useEffect(() => {
     setForm(mergeAppSettings(settings));
@@ -51,7 +43,7 @@ export default function SettingsPage() {
 
   useEffect(() => {
     setLocalUsers(readLocalTeacherRegistry());
-    if (unlocked && authState.user?.uid) loadManagedUsers();
+    if (unlocked) loadTeacherUsers();
   }, [unlocked, authState.user?.uid]);
 
   function unlock() {
@@ -83,9 +75,7 @@ export default function SettingsPage() {
       const cleanPayload = JSON.parse(JSON.stringify({ ...mergeAppSettings(form), updatedAt: Date.now() }));
       delete cleanPayload.geminiApiKey;
       localStorage.setItem(LOCAL_APP_SETTINGS_KEY, JSON.stringify(cleanPayload));
-      if (authState.user?.uid) {
-        await setDoc(doc(db, ...APP_SETTINGS_PATH), cleanPayload).catch(() => {});
-      }
+      if (authState.user?.uid) await setDoc(doc(db, ...APP_SETTINGS_PATH), cleanPayload).catch(() => {});
       setForm(cleanPayload);
       setStatus("설정을 저장했습니다.");
     } catch (err) {
@@ -95,12 +85,16 @@ export default function SettingsPage() {
     }
   }
 
-  async function loadManagedUsers() {
-    if (!authState.user?.uid) return;
+  async function loadTeacherUsers() {
     try {
-      const snapshot = await getDocs(collection(db, "users", authState.user.uid, "managedUsers"));
-      setManagedUsers(snapshot.docs.map((item) => item.data()));
+      const registrySnapshot = await getDocs(collection(db, "teacherRegistry"));
+      setRegistryUsers(registrySnapshot.docs.map((item) => item.data()));
       setLocalUsers(readLocalTeacherRegistry());
+
+      if (authState.user?.uid) {
+        const managedSnapshot = await getDocs(collection(db, "users", authState.user.uid, "managedUsers"));
+        setManagedUsers(managedSnapshot.docs.map((item) => item.data()));
+      }
     } catch (err) {
       setStatus(err.message || "회원 리스트를 불러오지 못했습니다.");
     }
@@ -112,7 +106,7 @@ export default function SettingsPage() {
     try {
       await createManagedTeacher(authState.user, managedForm);
       setManagedForm({ id: "", password: "", email: "" });
-      await loadManagedUsers();
+      await loadTeacherUsers();
       setStatus("회원을 생성했습니다. 생성한 id/pw로 로그인할 수 있습니다.");
     } catch (err) {
       setStatus(err.message || "회원 생성에 실패했습니다.");
@@ -209,7 +203,7 @@ export default function SettingsPage() {
         <div>
           <p>Admin Only</p>
           <h1>관리자 설정</h1>
-          <span>회원 리스트와 메인 화면 기본 설정을 관리합니다.</span>
+          <span>모든 기기에서 가입한 회원 리스트와 메인 화면 기본 설정을 관리합니다.</span>
         </div>
         <Link to="/">메인으로 돌아가기</Link>
       </header>
@@ -220,7 +214,7 @@ export default function SettingsPage() {
       <div className="settings-grid">
         <section className="settings-panel">
           <h2><KeyRound size={20} /> 교사 회원 관리</h2>
-          <p className="settings-help">회원가입한 계정과 관리자가 생성한 계정을 확인합니다.</p>
+          <p className="settings-help">회원가입한 계정과 관리자가 생성한 계정을 공용 목록에서 확인합니다.</p>
           {!authState.loggedIn && <p className="settings-status settings-status-error">회원 생성은 로그인 후 사용할 수 있습니다.</p>}
           <label>id</label>
           <input value={managedForm.id} onChange={(event) => updateManagedField("id", event.target.value)} disabled={!authState.loggedIn || busy} />
