@@ -1,5 +1,4 @@
 [[redirects]]
-  from = "/api/gemini"
-  to = "/.netlify/functions/gemini"
+  from = "/api/ai-evaluation"
+  to = "/.netlify/functions/ai-evaluation"
   status = 200
-

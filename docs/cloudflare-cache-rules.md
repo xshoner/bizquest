@@ -25,7 +25,7 @@ Create bypass rules before any broad cache-everything rule:
 - If: `URI Path starts with /api/`
   - Cache eligibility: `Bypass cache`
 
-Do not cache API responses that call Gemini or any route that returns user-specific data.
+Do not cache AI gateway responses or any route that returns user-specific data.
 
 ## 3. Firebase Storage media
 

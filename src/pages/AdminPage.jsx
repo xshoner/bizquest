@@ -917,33 +917,34 @@ export default function AdminPage() {
       `한 줄 표현: ${team.idea?.tagline || "-"}`
     ].join("\n");
 
-    const requestBody = {
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { responseMimeType: "application/json", temperature: 0.25 }
-    };
-    const response = await requestGeminiViaProxy(requestBody);
-    return parseGeminiResponse(response);
+    const response = await requestLetsurViaProxy(prompt);
+    return parseLetsurResponse(response);
   }
 
-  async function requestGeminiViaProxy(requestBody) {
-    return fetch("/api/gemini", {
+  async function requestLetsurViaProxy(prompt) {
+    return fetch("/api/ai-evaluation", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ requestBody })
+      body: JSON.stringify({ prompt })
     });
   }
 
-  async function parseGeminiResponse(response) {
+  async function parseLetsurResponse(response) {
     if (!response.ok) {
       const errorText = await response.text().catch(() => "");
       const deployedHost = window.location.host;
-      const hint = response.status === 403
-        ? ` 배포 도메인(${deployedHost})의 /api/gemini 함수에서 GEMINI_API_KEY가 거부되었습니다. 서버 환경변수의 키 제한을 확인하세요.`
+      const hint = response.status === 401 || response.status === 403
+        ? ` 배포 도메인(${deployedHost})의 /api/ai-evaluation 함수에서 LETSUR_API_KEY가 거부되었습니다. 서버 환경변수를 확인하세요.`
         : "";
-      throw new Error(`Gemini 응답 오류 ${response.status}.${hint}${errorText ? ` ${errorText.slice(0, 220)}` : ""}`);
+      throw new Error(`AI 응답 오류 ${response.status}.${hint}${errorText ? ` ${errorText.slice(0, 220)}` : ""}`);
     }
     const payload = await response.json();
-    const text = payload.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+    const content = payload.choices?.[0]?.message?.content;
+    const text = typeof content === "string"
+      ? content
+      : Array.isArray(content)
+        ? content.map((part) => part?.text || part?.content || "").join("")
+        : "{}";
     return normalizeAiEvaluation(JSON.parse(stripJsonFence(text)));
   }
 
@@ -1659,9 +1660,9 @@ function stripJsonFence(text) {
 function makeAiEvaluationMessage(evaluations = {}) {
   const values = Object.values(evaluations);
   const fallbackCount = values.filter((evaluation) => String(evaluation?.model || "").includes("fallback")).length;
-  const geminiCount = Math.max(0, values.length - fallbackCount);
+  const aiSuccessCount = Math.max(0, values.length - fallbackCount);
   if (fallbackCount > 0) {
-    return `AI 평가 완료: Gemini 성공 ${geminiCount}팀, 기본 평가 적용 ${fallbackCount}팀. 평가의견에서 실패 사유를 확인하세요.`;
+    return `AI 평가 완료: 렛서 AI 성공 ${aiSuccessCount}팀, 기본 평가 적용 ${fallbackCount}팀. 평가의견에서 실패 사유를 확인하세요.`;
   }
   return `AI 사업계획서 평가가 완료되었습니다. 팀 패널에서 14개 지표와 1~2줄 종합의견을 확인하세요.`;
 }
@@ -1680,7 +1681,7 @@ function normalizeAiEvaluation(raw) {
     factors,
     opinion: String(raw?.opinion || "사업계획의 강점과 보완점을 바탕으로 경영 시뮬레이션을 진행합니다.").slice(0, 160),
     evaluatedAt: Date.now(),
-    model: "gemini-2.5-flash"
+    model: "gemini-2.5-pro-via-letsur"
   };
 }
 
@@ -1718,9 +1719,9 @@ function makeFallbackAiEvaluation(team, error) {
   }
   return {
     factors,
-    opinion: `Gemini 응답 문제로 기본 평가 기준을 적용했습니다. ${team.idea?.serviceName || team.idea?.product || "이 아이디어"}는 강점 지표를 살리고 취약 지표를 보완해야 합니다.`,
+    opinion: `렛서 AI 응답 문제로 기본 평가 기준을 적용했습니다. ${team.idea?.serviceName || team.idea?.product || "이 아이디어"}는 강점 지표를 살리고 취약 지표를 보완해야 합니다.`,
     evaluatedAt: Date.now(),
-    model: "gemini-2.5-flash-fallback",
+    model: "gemini-2.5-pro-via-letsur-fallback",
     errorMessage: String(error?.message || "unknown").slice(0, 240)
   };
 }
@@ -1785,5 +1786,3 @@ function playWhoosh() {
     // Browser autoplay policies can block audio until the user interacts.
   }
 }
-
-
