@@ -44,7 +44,7 @@ import {
   Trash2,
   Users
 } from "lucide-react";
-import { getDoc, setDoc, updateDoc } from "../firebase.js";
+import { collection, db, getDoc, getDocs, setDoc, updateDoc } from "../firebase.js";
 import { BUSINESS_FACTORS, STATUSES, STATUS_LABELS } from "../data/gameData.js";
 import {
   TEAM_BASE_ASSET,
@@ -90,6 +90,8 @@ const PHASE_ICONS = {
 };
 const AI_GRADES = ["양호", "보통", "취약"];
 const SIMULATION_EVENT_DELAY = 5000;
+const SIMULATION_LEASE_TIMEOUT = 12000;
+const AI_EVALUATION_LEASE_TIMEOUT = 15000;
 const SIMULATION_SPEEDS = {
   slow: { label: "느림", rate: "5초", delay: SIMULATION_EVENT_DELAY },
   normal: { label: "보통", rate: "5초", delay: SIMULATION_EVENT_DELAY },
@@ -101,7 +103,23 @@ const eventCardImages = Object.fromEntries(
     .filter(([id]) => id)
 );
 
-function LandingPage({ appSettings, roomTitle, setRoomTitle, joinCode, setJoinCode, actionError, creating, createRoom, joinAsStudent, authState, onOpenAuth }) {
+function makeAdminSessionId() {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
+  return `admin-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function formatSavedAt(value) {
+  const timestamp = Number(value || 0);
+  if (!timestamp) return "저장된 수업";
+  return new Intl.DateTimeFormat("ko-KR", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(new Date(timestamp));
+}
+
+function LandingPage({ appSettings, roomTitle, setRoomTitle, joinCode, setJoinCode, actionError, creating, createRoom, joinAsStudent, authState, onOpenAuth, recentRooms, recentRoomsLoading, onResumeRoom }) {
   const landing = appSettings.landing;
   const [quickStartTab, setQuickStartTab] = useState("teacher");
   const navTargets = ["intro", "features", "class-flow", "cases", "faq"];
@@ -184,6 +202,33 @@ function LandingPage({ appSettings, roomTitle, setRoomTitle, joinCode, setJoinCo
                 <Plus size={18} />
                 {creating ? landing.creatingButton : landing.createButton}
               </button>
+              {authState.loggedIn && (
+                <div className="mt-5 border-t border-indigo-100 pt-4">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <strong className="text-sm text-slate-900">진행 중인 수업 이어하기</strong>
+                    {recentRoomsLoading && <span className="text-xs text-slate-500">불러오는 중...</span>}
+                  </div>
+                  <div className="grid gap-2">
+                    {recentRooms.map((savedRoom) => (
+                      <button
+                        key={savedRoom.roomId}
+                        type="button"
+                        onClick={() => onResumeRoom(savedRoom.roomId)}
+                        className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-3 text-left transition hover:border-indigo-300 hover:bg-indigo-50"
+                      >
+                        <span className="min-w-0">
+                          <b className="block truncate text-sm text-slate-900">{savedRoom.roomTitle || savedRoom.roomId}</b>
+                          <span className="text-xs text-slate-500">{savedRoom.roomId} · {STATUS_LABELS[savedRoom.status] || savedRoom.status}</span>
+                        </span>
+                        <span className="shrink-0 text-xs font-bold text-indigo-600">{formatSavedAt(savedRoom.updatedAt || savedRoom.lastOpenedAt || savedRoom.createdAt)}</span>
+                      </button>
+                    ))}
+                    {!recentRoomsLoading && recentRooms.length === 0 && (
+                      <p className="rounded-xl bg-slate-50 px-3 py-3 text-sm text-slate-500">이어갈 수업이 아직 없습니다.</p>
+                    )}
+                  </div>
+                </div>
+              )}
             </section>
             )}
 
@@ -432,7 +477,7 @@ export default function AdminPage() {
   const { roomId } = useParams();
   const navigate = useNavigate();
   const authState = useTeacherAuth();
-  const { room, loading, error } = useRoom(roomId, authState.user?.uid);
+  const { room, loading, error } = useRoom(authState.ready && authState.loggedIn ? roomId : null, authState.user?.uid);
   const { settings: appSettings } = useAppSettings();
   const [roomTitle, setRoomTitle] = useState("스타트업 히어로");
   const [joinCode, setJoinCode] = useState("");
@@ -447,14 +492,51 @@ export default function AdminPage() {
   const [evaluating, setEvaluating] = useState(false);
   const [simulationRunning, setSimulationRunning] = useState(false);
   const [authModal, setAuthModal] = useState(null);
+  const [recentRooms, setRecentRooms] = useState([]);
+  const [recentRoomsLoading, setRecentRoomsLoading] = useState(false);
   const intervalRef = useRef(null);
+  const aiHeartbeatRef = useRef(null);
+  const finalizeTimerRef = useRef(null);
+  const adminSessionIdRef = useRef(makeAdminSessionId());
   const bgmRef = useRef(null);
   const resultBoardRef = useRef(null);
 
   useEffect(() => () => {
     if (intervalRef.current) clearInterval(intervalRef.current);
+    if (aiHeartbeatRef.current) clearInterval(aiHeartbeatRef.current);
+    if (finalizeTimerRef.current) clearTimeout(finalizeTimerRef.current);
     stopSimulationBgm();
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (roomId || !authState.ready || !authState.loggedIn) {
+      setRecentRooms([]);
+      setRecentRoomsLoading(false);
+      return undefined;
+    }
+
+    setRecentRoomsLoading(true);
+    getDocs(collection(db, "users", authState.user.uid, "rooms"))
+      .then((snapshot) => {
+        if (cancelled) return;
+        const rooms = snapshot.docs
+          .map((item) => ({ roomId: item.id, ...item.data() }))
+          .sort((a, b) => Number(b.updatedAt || b.lastOpenedAt || b.createdAt || 0) - Number(a.updatedAt || a.lastOpenedAt || a.createdAt || 0))
+          .slice(0, 5);
+        setRecentRooms(rooms);
+      })
+      .catch((err) => {
+        if (!cancelled) setActionError(err.message || "진행 중인 수업을 불러오지 못했습니다.");
+      })
+      .finally(() => {
+        if (!cancelled) setRecentRoomsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authState.loggedIn, authState.ready, authState.user?.uid, roomId]);
 
   useEffect(() => {
     if (room?.status === STATUSES.RESULT) {
@@ -508,6 +590,98 @@ export default function AdminPage() {
   const investmentChartVisible = [STATUSES.INVESTMENT, STATUSES.SIMULATION, STATUSES.RESULT].includes(room?.status);
   const currentRoomRef = () => roomDocRef(authState.user.uid, roomId);
 
+  async function updateRoom(patch) {
+    if (!roomId || !authState.user?.uid) return;
+    await updateDoc(currentRoomRef(), { ...patch, updatedAt: Date.now() });
+  }
+
+  function startAiHeartbeat() {
+    if (aiHeartbeatRef.current) clearInterval(aiHeartbeatRef.current);
+    aiHeartbeatRef.current = window.setInterval(() => {
+      updateRoom({ aiEvaluationHeartbeatAt: Date.now() }).catch(() => {});
+    }, 5000);
+  }
+
+  function stopAiHeartbeat() {
+    if (!aiHeartbeatRef.current) return;
+    clearInterval(aiHeartbeatRef.current);
+    aiHeartbeatRef.current = null;
+  }
+
+  function scheduleResultFinalization(finalizeAt) {
+    if (finalizeTimerRef.current) return;
+    const delay = Math.max(0, Number(finalizeAt || 0) - Date.now());
+    finalizeTimerRef.current = window.setTimeout(async () => {
+      finalizeTimerRef.current = null;
+      await updateRoom({
+        resultFinalizing: false,
+        resultFinalizeAt: 0,
+        status: STATUSES.RESULT,
+        sysMessage: "최종 결과가 공개되었습니다."
+      });
+    }, delay);
+  }
+
+  useEffect(() => {
+    if (!roomId || !authState.user?.uid) return;
+    updateRoom({ lastOpenedAt: Date.now() }).catch(() => {});
+  }, [authState.user?.uid, roomId]);
+
+  useEffect(() => {
+    if (!roomId || !room || room.status !== STATUSES.SIMULATION || !room.simulationRunning || simulationRunning || intervalRef.current || room.simulationOwner === adminSessionIdRef.current) return undefined;
+
+    const heartbeatAge = Date.now() - Number(room.simulationHeartbeatAt || 0);
+    const hasFreshOwner = room.simulationOwner && room.simulationOwner !== adminSessionIdRef.current && heartbeatAge < SIMULATION_LEASE_TIMEOUT;
+    const delay = hasFreshOwner ? SIMULATION_LEASE_TIMEOUT - heartbeatAge + 250 : 0;
+    const recoveryTimer = window.setTimeout(async () => {
+      const snapshot = await getDoc(currentRoomRef()).catch(() => null);
+      const savedRoom = snapshot?.exists() ? snapshot.data() : null;
+      if (!savedRoom?.simulationRunning) return;
+      const savedHeartbeatAge = Date.now() - Number(savedRoom.simulationHeartbeatAt || 0);
+      if (savedRoom.simulationOwner && savedRoom.simulationOwner !== adminSessionIdRef.current && savedHeartbeatAge < SIMULATION_LEASE_TIMEOUT) return;
+      await updateRoom({
+        simulationRunning: false,
+        simulationOwner: null,
+        simulationHeartbeatAt: 0,
+        sysMessage: `${Number(savedRoom.currentMonth || 0)}개월 차에서 안전하게 일시정지했습니다. 계속하기를 누르면 다음 시점부터 재개합니다.`
+      });
+    }, delay);
+
+    return () => clearTimeout(recoveryTimer);
+  }, [authState.user?.uid, room?.simulationHeartbeatAt, room?.simulationOwner, room?.simulationRunning, room?.status, roomId, simulationRunning]);
+
+  useEffect(() => {
+    if (!roomId || !room || room.aiEvaluationStatus !== "evaluating" || evaluating || room.aiEvaluationOwner === adminSessionIdRef.current) return undefined;
+
+    const heartbeatAge = Date.now() - Number(room.aiEvaluationHeartbeatAt || room.aiEvaluationStartedAt || 0);
+    const hasFreshOwner = room.aiEvaluationOwner && room.aiEvaluationOwner !== adminSessionIdRef.current && heartbeatAge < AI_EVALUATION_LEASE_TIMEOUT;
+    const delay = hasFreshOwner ? AI_EVALUATION_LEASE_TIMEOUT - heartbeatAge + 250 : 0;
+    const recoveryTimer = window.setTimeout(async () => {
+      const snapshot = await getDoc(currentRoomRef()).catch(() => null);
+      const savedRoom = snapshot?.exists() ? snapshot.data() : null;
+      if (savedRoom?.aiEvaluationStatus !== "evaluating") return;
+      const savedHeartbeatAge = Date.now() - Number(savedRoom.aiEvaluationHeartbeatAt || savedRoom.aiEvaluationStartedAt || 0);
+      if (savedRoom.aiEvaluationOwner && savedRoom.aiEvaluationOwner !== adminSessionIdRef.current && savedHeartbeatAge < AI_EVALUATION_LEASE_TIMEOUT) return;
+      await updateRoom({
+        aiEvaluationStatus: "interrupted",
+        aiEvaluationOwner: null,
+        sysMessage: "관리자 연결이 중단되어 AI 평가를 안전하게 멈췄습니다. AI 평가 단계를 다시 누르면 완료되지 않은 팀부터 이어집니다."
+      });
+    }, delay);
+
+    return () => clearTimeout(recoveryTimer);
+  }, [authState.user?.uid, evaluating, room?.aiEvaluationHeartbeatAt, room?.aiEvaluationOwner, room?.aiEvaluationStartedAt, room?.aiEvaluationStatus, roomId]);
+
+  useEffect(() => {
+    if (!roomId || !room?.resultFinalizing) return;
+    scheduleResultFinalization(room.resultFinalizeAt || Date.now());
+  }, [room?.resultFinalizeAt, room?.resultFinalizing, roomId]);
+
+  useEffect(() => {
+    if (!roomId || simulationRunning || Number(room?.currentMonth || 0) < 24 || !room?.currentEvent || room.currentEventApplied !== false) return;
+    applySimulationEvent(room.currentEvent, Number(room.currentMonth || 0)).catch(() => {});
+  }, [room?.currentEvent?.id, room?.currentEventApplied, room?.currentMonth, roomId, simulationRunning]);
+
   async function createRoom() {
     setActionError("");
     if (!authState.loggedIn) {
@@ -542,27 +716,27 @@ export default function AdminPage() {
         Object.values(students).some((student) => student.team === teamKey)
       );
       if (activeTeams.length === 0) {
-        await updateDoc(currentRoomRef(), {
+        await updateRoom({
           sysMessage: "학생을 팀에 배치한 뒤 다음 단계로 이동할 수 있습니다."
         });
         return;
       }
       const unassignedStudents = Object.values(students).some((student) => !student.team);
       if (unassignedStudents) {
-        await updateDoc(currentRoomRef(), {
+        await updateRoom({
           sysMessage: "대기 중인 학생을 모두 팀에 배치한 뒤 다음 단계로 이동할 수 있습니다."
         });
         return;
       }
       const missingLeader = activeTeams.some(([, team]) => !team.leaderId);
       if (missingLeader) {
-        await updateDoc(currentRoomRef(), {
+        await updateRoom({
           sysMessage: "팀장을 지정하세요. 참가자가 있는 모든 팀에 팀장이 있어야 다음 단계로 이동할 수 있습니다."
         });
         return;
       }
     }
-    await updateDoc(currentRoomRef(), {
+    await updateRoom({
       status,
       sysMessage: `${STATUS_LABELS[status]} 단계로 이동했습니다.`
     });
@@ -578,7 +752,11 @@ export default function AdminPage() {
       return;
     }
     if (status === STATUSES.SIMULATION) {
-      await runSimulation(0);
+      if (room?.status === STATUSES.SIMULATION && Number(room.currentMonth || 0) > 0) {
+        await resumeSimulation();
+      } else {
+        await runSimulation(0);
+      }
       return;
     }
     if (status === STATUSES.RESULT) {
@@ -591,29 +769,27 @@ export default function AdminPage() {
   async function finalizeResults() {
     if (!roomId) return;
     if (Number(room?.currentMonth || 0) < 24) {
-      await updateDoc(currentRoomRef(), {
+      await updateRoom({
         sysMessage: "24개월 경영 시뮬레이션이 끝난 뒤 최종 결과를 집계할 수 있습니다."
       });
       return;
     }
     stopSimulationBgm();
-    await updateDoc(currentRoomRef(), {
+    const resultFinalizeAt = Date.now() + 3000;
+    await updateRoom({
       resultFinalizing: true,
+      resultFinalizeAt,
       simulationRunning: false,
+      simulationOwner: null,
+      simulationHeartbeatAt: 0,
       sysMessage: "최종결과 집계중..."
     });
-    window.setTimeout(() => {
-      updateDoc(currentRoomRef(), {
-        resultFinalizing: false,
-        status: STATUSES.RESULT,
-        sysMessage: "최종 결과가 공개되었습니다."
-      });
-    }, 3000);
+    scheduleResultFinalization(resultFinalizeAt);
   }
 
   async function setLeader(uid, teamKey) {
     const nickname = students[uid]?.nickname || "학생";
-    await updateDoc(currentRoomRef(), {
+    await updateRoom({
       [`teams.${teamKey}.leaderId`]: uid,
       sysMessage: `${nickname} 학생이 ${teams[teamKey]?.teamName || "팀"} 팀장이 되었습니다.`
     });
@@ -621,7 +797,7 @@ export default function AdminPage() {
 
   async function renameTeam(teamKey, teamName) {
     const fallback = teams[teamKey]?.teamName || "팀";
-    await updateDoc(currentRoomRef(), {
+    await updateRoom({
       [`teams.${teamKey}.teamName`]: normalizeTeamName(teamName.trim() || fallback),
       sysMessage: "팀 이름이 변경되었습니다."
     });
@@ -629,7 +805,7 @@ export default function AdminPage() {
 
   async function addTeam() {
     const key = makeNextTeamKey(teams);
-    await updateDoc(currentRoomRef(), {
+    await updateRoom({
       [`teams.${key}`]: makeTeam(key, Object.keys(teams).length),
       sysMessage: "팀을 추가했습니다."
     });
@@ -647,7 +823,7 @@ export default function AdminPage() {
       ])
     );
 
-    await updateDoc(currentRoomRef(), {
+    await updateRoom({
       teams: nextTeams,
       students: nextStudents,
       sysMessage: `${removedName}이 삭제되어 해당 팀 학생은 대기실로 이동했습니다.`
@@ -656,7 +832,7 @@ export default function AdminPage() {
 
   async function assignStudentToTeam(uid, teamKey) {
     const nickname = students[uid]?.nickname || "학생";
-    await updateDoc(currentRoomRef(), {
+    await updateRoom({
       [`students.${uid}.team`]: teamKey,
       sysMessage: `${nickname} 학생을 ${teams[teamKey]?.teamName || "팀"}에 배정했습니다.`
     });
@@ -671,7 +847,7 @@ export default function AdminPage() {
       key,
       team.leaderId === uid ? { ...team, leaderId: null } : team
     ]));
-    await updateDoc(currentRoomRef(), {
+    await updateRoom({
       students: nextStudents,
       teams: nextTeams,
       sysMessage: `${nickname} 학생을 대기실에서 내보냈습니다.`
@@ -686,7 +862,7 @@ export default function AdminPage() {
       key,
       previousTeam === key && team.leaderId === uid ? { ...team, leaderId: null } : team
     ]));
-    await updateDoc(currentRoomRef(), {
+    await updateRoom({
       [`students.${uid}.team`]: teamKey,
       teams: nextTeams,
       sysMessage: `${nickname} 학생을 ${teams[teamKey]?.teamName || "팀"}으로 이동했습니다.`
@@ -695,7 +871,7 @@ export default function AdminPage() {
   }
 
   async function lockBusinessPlan(teamKey) {
-    await updateDoc(currentRoomRef(), {
+    await updateRoom({
       [`teams.${teamKey}.ideaLocked`]: true,
       sysMessage: `${teams[teamKey]?.teamName || "팀"} 사업계획을 확정했습니다. 학생 화면에서 더 이상 수정할 수 없습니다.`
     });
@@ -704,43 +880,77 @@ export default function AdminPage() {
   async function evaluateBusinessPlans() {
     if (!roomId || evaluating) return;
     if (!allPlansSubmitted) {
-      await updateDoc(currentRoomRef(), {
+      await updateRoom({
         sysMessage: "모든 팀의 사업계획서가 등록되어야 AI 평가를 시작할 수 있습니다."
       });
       return;
     }
+
+    const evaluations = Object.fromEntries(
+      activeTeamEntries
+        .filter(([, team]) => team.aiEvaluation)
+        .map(([teamKey, team]) => [teamKey, team.aiEvaluation])
+    );
+    const pendingEntries = activeTeamEntries.filter(([, team]) => !team.aiEvaluation);
+    if (pendingEntries.length === 0) {
+      await updateRoom({
+        aiEvaluationStatus: "done",
+        aiEvaluationOwner: null,
+        aiEvaluationProgress: { completed: activeTeamEntries.length, total: activeTeamEntries.length },
+        status: STATUSES.AI_EVALUATION,
+        sysMessage: "모든 팀의 AI 평가가 이미 완료되었습니다. 투자 유치 단계로 이동할 수 있습니다."
+      });
+      return;
+    }
+
     setEvaluating(true);
     try {
-      await updateDoc(currentRoomRef(), {
+      const startedAt = Date.now();
+      await updateRoom({
         status: STATUSES.AI_EVALUATION,
         aiEvaluationStatus: "evaluating",
-        sysMessage: "지금 모두의 사업계획을 비즈니스 전문 AI가 평가중입니다..."
+        aiEvaluationOwner: adminSessionIdRef.current,
+        aiEvaluationStartedAt: startedAt,
+        aiEvaluationHeartbeatAt: startedAt,
+        aiEvaluationProgress: { completed: Object.keys(evaluations).length, total: activeTeamEntries.length },
+        sysMessage: pendingEntries.length === activeTeamEntries.length
+          ? "지금 모두의 사업계획을 비즈니스 전문 AI가 평가중입니다..."
+          : `중단된 AI 평가를 이어서 진행합니다. 남은 팀 ${pendingEntries.length}개를 평가합니다.`
       });
-      const evaluations = {};
-      for (const [teamKey, team] of activeTeamEntries) {
+      startAiHeartbeat();
+
+      for (const [teamKey, team] of pendingEntries) {
         try {
           evaluations[teamKey] = await requestAiEvaluation(team);
         } catch (err) {
           evaluations[teamKey] = makeFallbackAiEvaluation(team, err);
         }
+        const completed = Object.keys(evaluations).length;
+        await updateRoom({
+          [`teams.${teamKey}.aiEvaluation`]: evaluations[teamKey],
+          aiEvaluationHeartbeatAt: Date.now(),
+          aiEvaluationProgress: { completed, total: activeTeamEntries.length },
+          sysMessage: `AI 평가 진행 중: ${completed}/${activeTeamEntries.length}팀 완료`
+        });
       }
-      const nextTeams = Object.fromEntries(Object.entries(teams).map(([key, team]) => [
-        key,
-        evaluations[key] ? { ...team, aiEvaluation: evaluations[key] } : team
-      ]));
-      await updateDoc(currentRoomRef(), {
-        teams: nextTeams,
+
+      await updateRoom({
         aiEvaluationStatus: "done",
+        aiEvaluationOwner: null,
+        aiEvaluationHeartbeatAt: Date.now(),
+        aiEvaluationProgress: { completed: activeTeamEntries.length, total: activeTeamEntries.length },
         status: STATUSES.AI_EVALUATION,
         sysMessage: `${makeAiEvaluationMessage(evaluations)} 교사가 투자 유치 단계를 누르면 다음 단계로 이동합니다.`
       });
     } catch (err) {
-      await updateDoc(currentRoomRef(), {
+      await updateRoom({
         aiEvaluationStatus: "error",
+        aiEvaluationOwner: null,
         status: STATUSES.AI_EVALUATION,
-        sysMessage: `AI 평가에 실패했습니다. ${err.message || "잠시 후 다시 시도하세요."}`
+        sysMessage: `AI 평가가 중단되었습니다. 다시 실행하면 완료되지 않은 팀부터 이어집니다. ${err.message || "잠시 후 다시 시도하세요."}`
       });
     } finally {
+      stopAiHeartbeat();
       setEvaluating(false);
     }
   }
@@ -750,37 +960,68 @@ export default function AdminPage() {
       const base = TEAM_BASE_ASSET + Number(team.investmentsReceived || 0);
       return [key, { ...team, initialCapital: base, currentAsset: base, midDecision: null, lastEventImpact: null, assetHistory: [{ month: 0, asset: base }] }];
     }));
-    await updateDoc(currentRoomRef(), {
+    await updateRoom({
       teams: nextTeams,
       currentMonth: 0,
       currentEvent: null,
+      currentEventApplied: true,
       eventHistory: [],
       currentDecision: null,
       aiEvaluationStatus: "done",
       resultFinalizing: false,
+      resultFinalizeAt: 0,
       simulationRunning: true,
+      simulationOwner: adminSessionIdRef.current,
+      simulationHeartbeatAt: Date.now(),
       status: STATUSES.SIMULATION,
       sysMessage: "AI 경영 시뮬레이션을 시작합니다. 모든 팀은 기본 자산 100,000,000원에 투자 유치금을 더해 출발합니다."
+    });
+  }
+
+  async function applySimulationEvent(event, month) {
+    const applySnap = await getDoc(currentRoomRef());
+    if (!applySnap.exists()) return;
+    const applyRoom = applySnap.data();
+    if (Number(applyRoom.currentMonth || 0) !== month || applyRoom.currentEvent?.id !== event.id || applyRoom.currentEventApplied) return;
+    const nextTeams = Object.fromEntries(
+      Object.entries(applyRoom.teams || {}).map(([key, team]) => {
+        const updated = applyRiskMultiplier(team, event);
+        const history = Array.isArray(team.assetHistory) && team.assetHistory.length > 0
+          ? team.assetHistory
+          : [{ month: 0, asset: Number(team.initialCapital || TEAM_BASE_ASSET) }];
+        return [key, { ...updated, assetHistory: [...history, { month, asset: updated.currentAsset }] }];
+      })
+    );
+    const keepRunning = Boolean(applyRoom.simulationRunning) && month < 24;
+    await updateRoom({
+      teams: nextTeams,
+      currentEventApplied: true,
+      simulationRunning: keepRunning,
+      simulationOwner: keepRunning ? applyRoom.simulationOwner || adminSessionIdRef.current : null,
+      simulationHeartbeatAt: keepRunning ? Date.now() : 0,
+      sysMessage: month >= 24 ? "24개월 경영 시뮬레이션이 종료되었습니다. 교사가 최종 결과 버튼을 누르면 결과가 공개됩니다." : `${month}개월 차 이벤트 자산 변동이 반영되었습니다.`
     });
   }
 
   async function runSimulation(startMonth = 0, speed = "normal") {
     if (!roomId || intervalRef.current) return;
     if (!allTeamsEvaluated) {
-      await updateDoc(currentRoomRef(), {
+      await updateRoom({
         sysMessage: "먼저 모든 팀의 AI 평가를 완료해야 경영 시뮬레이션을 시작할 수 있습니다."
       });
       return;
     }
+    setSimulationRunning(true);
     if (startMonth === 0) await initializeAssets();
     if (startMonth > 0) {
-      await updateDoc(currentRoomRef(), {
+      await updateRoom({
         simulationRunning: true,
+        simulationOwner: adminSessionIdRef.current,
+        simulationHeartbeatAt: Date.now(),
         sysMessage: `${startMonth}개월 차부터 경영 시뮬레이션을 재개합니다.`
       });
     }
     let month = startMonth;
-    setSimulationRunning(true);
     playSimulationBgm();
 
     async function advanceOneMonth() {
@@ -788,6 +1029,15 @@ export default function AdminPage() {
       const freshSnap = await getDoc(currentRoomRef());
       if (!freshSnap.exists()) return;
       const freshRoom = freshSnap.data();
+      if (freshRoom.simulationOwner && freshRoom.simulationOwner !== adminSessionIdRef.current && freshRoom.simulationRunning) {
+        if (intervalRef.current) {
+          clearInterval(intervalRef.current);
+          intervalRef.current = null;
+        }
+        setSimulationRunning(false);
+        stopSimulationBgm();
+        return;
+      }
 
       const event = drawEvent();
       const nextEventHistory = [
@@ -797,37 +1047,23 @@ export default function AdminPage() {
       const eventPreviewTeams = Object.fromEntries(
         Object.entries(freshRoom.teams || {}).map(([key, team]) => [key, { ...team, lastEventImpact: null }])
       );
-      await updateDoc(currentRoomRef(), {
+      await updateRoom({
         teams: eventPreviewTeams,
         currentMonth: month,
         currentEvent: event,
+        currentEventApplied: false,
         eventHistory: nextEventHistory,
         currentDecision: null,
         simulationRunning: month < 24,
+        simulationOwner: month < 24 ? adminSessionIdRef.current : null,
+        simulationHeartbeatAt: month < 24 ? Date.now() : 0,
         status: STATUSES.SIMULATION,
         resultFinalizing: false,
         sysMessage: `${month}개월 차 이벤트: ${event.title}`
       });
 
       window.setTimeout(async () => {
-        const applySnap = await getDoc(currentRoomRef());
-        if (!applySnap.exists()) return;
-        const applyRoom = applySnap.data();
-        if (Number(applyRoom.currentMonth || 0) !== month || applyRoom.currentEvent?.id !== event.id) return;
-        const nextTeams = Object.fromEntries(
-          Object.entries(applyRoom.teams || {}).map(([key, team]) => {
-            const updated = applyRiskMultiplier(team, event);
-            const history = Array.isArray(team.assetHistory) && team.assetHistory.length > 0
-              ? team.assetHistory
-              : [{ month: 0, asset: Number(team.initialCapital || TEAM_BASE_ASSET) }];
-            return [key, { ...updated, assetHistory: [...history, { month, asset: updated.currentAsset }] }];
-          })
-        );
-        await updateDoc(currentRoomRef(), {
-          teams: nextTeams,
-          simulationRunning: month < 24,
-          sysMessage: month >= 24 ? "24개월 경영 시뮬레이션이 종료되었습니다. 교사가 최종 결과 버튼을 누르면 결과가 공개됩니다." : `${month}개월 차 이벤트 자산 변동이 반영되었습니다.`
-        });
+        await applySimulationEvent(event, month);
       }, 1500);
       if (month >= 24) {
         if (intervalRef.current) {
@@ -852,15 +1088,22 @@ export default function AdminPage() {
     setSimulationRunning(false);
     pauseSimulationBgm();
     if (roomId) {
-      updateDoc(currentRoomRef(), {
+      updateRoom({
         simulationRunning: false,
+        simulationOwner: null,
+        simulationHeartbeatAt: 0,
         sysMessage: "AI 경영 시뮬레이션을 일시정지했습니다."
       });
     }
   }
 
-  function resumeSimulation() {
+  async function resumeSimulation() {
     if (room?.status !== STATUSES.SIMULATION || intervalRef.current) return;
+    const snapshot = await getDoc(currentRoomRef());
+    const savedRoom = snapshot.exists() ? snapshot.data() : room;
+    if (savedRoom.currentEvent && savedRoom.currentEventApplied === false) {
+      await applySimulationEvent(savedRoom.currentEvent, Number(savedRoom.currentMonth || 0));
+    }
     runSimulation(room.currentMonth || 0);
   }
 
@@ -881,7 +1124,7 @@ export default function AdminPage() {
         }
       ];
     }));
-    await updateDoc(currentRoomRef(), {
+    await updateRoom({
       teams: nextTeams,
       currentDecision: null,
       sysMessage: "긴급 의사결정 결과를 반영했습니다. 시뮬레이션을 계속합니다."
@@ -963,9 +1206,28 @@ export default function AdminPage() {
           joinAsStudent={joinAsStudent}
           authState={authState}
           onOpenAuth={setAuthModal}
+          recentRooms={recentRooms}
+          recentRoomsLoading={recentRoomsLoading}
+          onResumeRoom={(savedRoomId) => navigate(`/admin/${savedRoomId}`)}
         />
         {authModal && <AuthModal mode={authModal} onClose={() => setAuthModal(null)} />}
       </>
+    );
+  }
+
+  if (!authState.ready) return <div className="p-8">관리자 로그인 상태를 확인하는 중입니다.</div>;
+  if (!authState.loggedIn) {
+    return (
+      <section className="grid min-h-screen place-items-center bg-slate-50 px-5">
+        <div className="w-full max-w-lg rounded-3xl bg-white p-8 text-center shadow-xl">
+          <ShieldCheck className="mx-auto text-indigo-600" size={46} />
+          <h1 className="mt-4 text-2xl font-black">진행 중인 수업을 이어가려면 로그인하세요</h1>
+          <p className="mt-3 text-slate-600">같은 교사 계정으로 로그인하면 방 코드 {roomId}의 저장된 단계부터 복구됩니다.</p>
+          <button type="button" onClick={() => setAuthModal("login")} className="mt-6 rounded-xl bg-indigo-600 px-6 py-3 font-bold text-white">교사 로그인</button>
+          <Link to="/" className="mt-4 block text-sm font-bold text-slate-500">메인으로 이동</Link>
+        </div>
+        {authModal && <AuthModal mode={authModal} onClose={() => setAuthModal(null)} />}
+      </section>
     );
   }
 
@@ -992,6 +1254,24 @@ export default function AdminPage() {
       </header>
 
       {room.sysMessage && <div className="event-notice ticker-pulse mt-4"><Megaphone size={24} /><div><p>진행 안내</p><strong>{room.sysMessage}</strong></div></div>}
+      {room.status === STATUSES.SIMULATION && !room.simulationRunning && Number(room.currentMonth || 0) < 24 && (
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4">
+          <div>
+            <b className="block text-amber-900">시뮬레이션이 {Number(room.currentMonth || 0)}개월 차에서 일시정지되어 있습니다.</b>
+            <span className="text-sm text-amber-700">저장된 자산과 이벤트 상태를 유지한 채 다음 시점부터 이어갑니다.</span>
+          </div>
+          <button type="button" onClick={resumeSimulation} className="inline-flex items-center gap-2 rounded-xl bg-amber-600 px-5 py-3 font-bold text-white"><Play size={18} /> 계속하기</button>
+        </div>
+      )}
+      {["interrupted", "error"].includes(room.aiEvaluationStatus) && (
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-indigo-200 bg-indigo-50 px-5 py-4">
+          <div>
+            <b className="block text-indigo-900">AI 평가가 중간에 멈췄습니다.</b>
+            <span className="text-sm text-indigo-700">완료된 팀 결과는 유지하고 미완료 팀부터 다시 시작합니다.</span>
+          </div>
+          <button type="button" onClick={evaluateBusinessPlans} className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-3 font-bold text-white"><Sparkles size={18} /> 평가 이어하기</button>
+        </div>
+      )}
       <PhaseRail currentStatus={room.status} onPhaseClick={handlePhaseClick} />
       {room.resultFinalizing && <ResultFinalizingShowcase />}
       <FanfareOnResult status={room.status} />

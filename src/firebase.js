@@ -12,9 +12,11 @@ import {
   writeBatch
 } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
 import {
+  browserLocalPersistence,
   createUserWithEmailAndPassword,
   getAuth,
   onAuthStateChanged,
+  setPersistence,
   signInAnonymously,
   signInWithEmailAndPassword,
   signOut,
@@ -38,6 +40,7 @@ export const auth = getAuth(app);
 export const secondaryAuth = getAuth(secondaryApp);
 
 export {
+  browserLocalPersistence,
   collection,
   createUserWithEmailAndPassword,
   deleteDoc,
@@ -46,6 +49,7 @@ export {
   getDocs,
   onAuthStateChanged,
   onSnapshot,
+  setPersistence,
   setDoc,
   signInAnonymously,
   signInWithEmailAndPassword,

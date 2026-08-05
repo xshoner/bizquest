@@ -1,19 +1,20 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   auth,
+  browserLocalPersistence,
   createUserWithEmailAndPassword,
   db,
   doc,
   onAuthStateChanged,
   secondaryAuth,
   setDoc,
+  setPersistence,
   signInWithEmailAndPassword,
   signOut,
   updateProfile
 } from "../firebase.js";
 
 const TEACHER_REGISTRY_KEY = "bizquest-teacher-registry";
-const TEACHER_SESSION_KEY = "bizquest-teacher-session-active";
 
 export function idToAuthEmail(id) {
   const normalized = String(id || "").trim().toLowerCase();
@@ -22,23 +23,6 @@ export function idToAuthEmail(id) {
 
 function sanitizeTeacherId(id) {
   return String(id || "").trim().replace(/\s+/g, "");
-}
-
-function markTeacherSession() {
-  if (typeof window !== "undefined") {
-    window.sessionStorage.setItem(TEACHER_SESSION_KEY, "true");
-  }
-}
-
-function clearTeacherSession() {
-  if (typeof window !== "undefined") {
-    window.sessionStorage.removeItem(TEACHER_SESSION_KEY);
-  }
-}
-
-function hasTeacherSession() {
-  if (typeof window === "undefined") return false;
-  return window.sessionStorage.getItem(TEACHER_SESSION_KEY) === "true";
 }
 
 function authErrorMessage(err, fallback = "처리 중 오류가 발생했습니다.") {
@@ -95,21 +79,24 @@ export function useTeacherAuth() {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (nextUser) => {
-      if (nextUser && !nextUser.isAnonymous && !hasTeacherSession()) {
-        await signOut(auth).catch(() => {});
-        localStorage.removeItem("bizquest-teacher-id");
-        setUser(null);
-        setTeacherId("");
-        setReady(true);
-        return;
-      }
+    let unsubscribe = () => {};
+    let active = true;
 
-      setUser(nextUser && !nextUser.isAnonymous ? nextUser : null);
-      setTeacherId(nextUser && !nextUser.isAnonymous ? nextUser.displayName || localStorage.getItem("bizquest-teacher-id") || "" : "");
-      setReady(true);
-    });
-    return () => unsubscribe();
+    setPersistence(auth, browserLocalPersistence)
+      .catch(() => null)
+      .finally(() => {
+        if (!active) return;
+        unsubscribe = onAuthStateChanged(auth, (nextUser) => {
+          setUser(nextUser && !nextUser.isAnonymous ? nextUser : null);
+          setTeacherId(nextUser && !nextUser.isAnonymous ? nextUser.displayName || localStorage.getItem("bizquest-teacher-id") || "" : "");
+          setReady(true);
+        });
+      });
+
+    return () => {
+      active = false;
+      unsubscribe();
+    };
   }, []);
 
   return useMemo(() => ({ user, teacherId, ready, loggedIn: Boolean(user) }), [ready, teacherId, user]);
@@ -118,8 +105,8 @@ export function useTeacherAuth() {
 export async function loginTeacher(id, password) {
   const teacherId = sanitizeTeacherId(id);
   if (!teacherId || !password) throw new Error("아이디와 비밀번호를 입력하세요.");
-  markTeacherSession();
   try {
+    await setPersistence(auth, browserLocalPersistence);
     const credential = await signInWithEmailAndPassword(auth, idToAuthEmail(teacherId), password);
     if (credential.user.displayName !== teacherId) {
       await updateProfile(credential.user, { displayName: teacherId });
@@ -133,7 +120,6 @@ export async function loginTeacher(id, password) {
     localStorage.setItem("bizquest-teacher-id", teacherId);
     return credential.user;
   } catch (err) {
-    clearTeacherSession();
     throw new Error(authErrorMessage(err, "로그인에 실패했습니다."));
   }
 }
@@ -142,8 +128,8 @@ export async function registerTeacher({ id, email, password, createdBy = "self",
   const teacherId = sanitizeTeacherId(id);
   if (!teacherId || !email || !password) throw new Error("id, pw, 이메일 주소를 모두 입력하세요.");
   validateTeacherPassword(password);
-  if (authInstance === auth) markTeacherSession();
   try {
+    if (authInstance === auth) await setPersistence(auth, browserLocalPersistence);
     const credential = await createUserWithEmailAndPassword(authInstance, idToAuthEmail(teacherId), password);
     await updateProfile(credential.user, { displayName: teacherId });
     const profile = {
@@ -160,7 +146,6 @@ export async function registerTeacher({ id, email, password, createdBy = "self",
     if (authInstance === auth) localStorage.setItem("bizquest-teacher-id", teacherId);
     return { user: credential.user, profile };
   } catch (err) {
-    if (authInstance === auth) clearTeacherSession();
     throw new Error(authErrorMessage(err, "회원가입에 실패했습니다."));
   }
 }
@@ -193,7 +178,6 @@ export async function createManagedTeacher(adminUser, payload) {
 }
 
 export async function logoutTeacher() {
-  clearTeacherSession();
   localStorage.removeItem("bizquest-teacher-id");
   await signOut(auth);
 }

@@ -57,16 +57,28 @@ export function makeDefaultTeams() {
 }
 
 export function makeInitialRoom(roomId, roomTitle = "스타트업 히어로") {
+  const now = Date.now();
   return {
     roomId,
     roomTitle,
+    createdAt: now,
+    updatedAt: now,
+    lastOpenedAt: now,
     status: "WAITING",
     currentMonth: 0,
     currentEvent: null,
+    currentEventApplied: true,
     eventHistory: [],
     aiEvaluationStatus: "idle",
+    aiEvaluationOwner: null,
+    aiEvaluationStartedAt: 0,
+    aiEvaluationHeartbeatAt: 0,
+    aiEvaluationProgress: null,
     simulationRunning: false,
+    simulationOwner: null,
+    simulationHeartbeatAt: 0,
     resultFinalizing: false,
+    resultFinalizeAt: 0,
     currentDecision: null,
     sysMessage: "방이 열렸습니다. QR 또는 방 코드로 입장하세요.",
     teams: makeDefaultTeams(),
