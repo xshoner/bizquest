@@ -4490,3 +4490,20 @@ select {
     display: none;
   }
 }
+
+/* The shared stage rule gives direct children z-index: 1. Restore the
+   navigation as the topmost stacking layer so its menu clears the hero. */
+.app-stage > section.landing-page > .landing-nav {
+  position: sticky;
+  z-index: 1000;
+  overflow: visible;
+  isolation: isolate;
+}
+
+.app-stage > section.landing-page > .landing-hero {
+  z-index: 0;
+}
+
+.app-stage > section.landing-page .saved-rooms-popover {
+  z-index: 1010;
+}
