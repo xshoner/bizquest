@@ -44,7 +44,7 @@ import {
   Trash2,
   Users
 } from "lucide-react";
-import { collection, db, getDoc, getDocs, setDoc, updateDoc } from "../firebase.js";
+import { collection, db, deleteDoc, getDoc, getDocs, setDoc, updateDoc } from "../firebase.js";
 import { BUSINESS_FACTORS, STATUSES, STATUS_LABELS } from "../data/gameData.js";
 import {
   TEAM_BASE_ASSET,
@@ -119,7 +119,91 @@ function formatSavedAt(value) {
   }).format(new Date(timestamp));
 }
 
-function LandingPage({ appSettings, roomTitle, setRoomTitle, joinCode, setJoinCode, actionError, creating, createRoom, joinAsStudent, authState, onOpenAuth, recentRooms, recentRoomsLoading, onResumeRoom }) {
+function SavedRoomsMenu({ rooms, loading, deletingRoomId, onResumeRoom, onDeleteRoom }) {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    function closeOnOutsideClick(event) {
+      if (!menuRef.current?.contains(event.target)) setOpen(false);
+    }
+    function closeOnEscape(event) {
+      if (event.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+
+  return (
+    <div className="saved-rooms-menu" ref={menuRef}>
+      <button
+        type="button"
+        className={`saved-rooms-trigger ${open ? "saved-rooms-trigger-open" : ""}`}
+        onClick={() => setOpen((current) => !current)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
+        <FileText size={17} />
+        <span>저장된 수업</span>
+        {!loading && rooms.length > 0 && <b>{rooms.length}</b>}
+        <ChevronDown size={15} className="saved-rooms-chevron" />
+      </button>
+      {open && (
+        <div className="saved-rooms-popover" role="menu" aria-label="저장된 수업">
+          <div className="saved-rooms-popover-head">
+            <span>
+              <strong>수업 이어하기</strong>
+              <small>마지막 저장 단계부터 바로 시작합니다.</small>
+            </span>
+            <span className="saved-rooms-count">{rooms.length}개</span>
+          </div>
+          <div className="saved-rooms-list">
+            {loading && <p className="saved-rooms-empty">저장된 수업을 불러오는 중입니다.</p>}
+            {!loading && rooms.map((savedRoom) => (
+              <div className="saved-room-item" key={savedRoom.roomId} role="menuitem">
+                <button
+                  type="button"
+                  className="saved-room-open"
+                  onClick={() => {
+                    setOpen(false);
+                    onResumeRoom(savedRoom.roomId);
+                  }}
+                >
+                  <span className="saved-room-icon"><Play size={15} /></span>
+                  <span className="saved-room-copy">
+                    <b>{savedRoom.roomTitle || savedRoom.roomId}</b>
+                    <small>{savedRoom.roomId} · {STATUS_LABELS[savedRoom.status] || savedRoom.status}</small>
+                  </span>
+                  <time>{formatSavedAt(savedRoom.updatedAt || savedRoom.lastOpenedAt || savedRoom.createdAt)}</time>
+                </button>
+                <button
+                  type="button"
+                  className="saved-room-delete"
+                  onClick={() => onDeleteRoom(savedRoom)}
+                  disabled={deletingRoomId === savedRoom.roomId}
+                  aria-label={`${savedRoom.roomTitle || savedRoom.roomId} 수업 삭제`}
+                  title="저장된 수업 삭제"
+                >
+                  {deletingRoomId === savedRoom.roomId ? <span className="saved-room-spinner" /> : <Trash2 size={16} />}
+                </button>
+              </div>
+            ))}
+            {!loading && rooms.length === 0 && (
+              <p className="saved-rooms-empty">저장된 수업이 아직 없습니다.<br />새 수업을 만들면 여기에 자동으로 저장됩니다.</p>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LandingPage({ appSettings, roomTitle, setRoomTitle, joinCode, setJoinCode, actionError, creating, createRoom, joinAsStudent, authState, onOpenAuth, recentRooms, recentRoomsLoading, deletingRoomId, onResumeRoom, onDeleteRoom }) {
   const landing = appSettings.landing;
   const [quickStartTab, setQuickStartTab] = useState("teacher");
   const navTargets = ["intro", "features", "class-flow", "cases", "faq"];
@@ -139,7 +223,18 @@ function LandingPage({ appSettings, roomTitle, setRoomTitle, joinCode, setJoinCo
             <a key={`${label}-${index}`} href={`#${navTargets[index] || "quick-start"}`}>{label}</a>
           ))}
         </div>
-        <AuthBar authState={authState} onOpenAuth={onOpenAuth} />
+        <div className="landing-nav-account">
+          {authState.loggedIn && (
+            <SavedRoomsMenu
+              rooms={recentRooms}
+              loading={recentRoomsLoading}
+              deletingRoomId={deletingRoomId}
+              onResumeRoom={onResumeRoom}
+              onDeleteRoom={onDeleteRoom}
+            />
+          )}
+          <AuthBar authState={authState} onOpenAuth={onOpenAuth} />
+        </div>
       </nav>
 
       <header id="top" className="landing-hero" style={{ "--landing-hero-image": `url(${heroBackgroundImage})` }}>
@@ -202,33 +297,6 @@ function LandingPage({ appSettings, roomTitle, setRoomTitle, joinCode, setJoinCo
                 <Plus size={18} />
                 {creating ? landing.creatingButton : landing.createButton}
               </button>
-              {authState.loggedIn && (
-                <div className="mt-5 border-t border-indigo-100 pt-4">
-                  <div className="mb-3 flex items-center justify-between gap-3">
-                    <strong className="text-sm text-slate-900">진행 중인 수업 이어하기</strong>
-                    {recentRoomsLoading && <span className="text-xs text-slate-500">불러오는 중...</span>}
-                  </div>
-                  <div className="grid gap-2">
-                    {recentRooms.map((savedRoom) => (
-                      <button
-                        key={savedRoom.roomId}
-                        type="button"
-                        onClick={() => onResumeRoom(savedRoom.roomId)}
-                        className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-3 text-left transition hover:border-indigo-300 hover:bg-indigo-50"
-                      >
-                        <span className="min-w-0">
-                          <b className="block truncate text-sm text-slate-900">{savedRoom.roomTitle || savedRoom.roomId}</b>
-                          <span className="text-xs text-slate-500">{savedRoom.roomId} · {STATUS_LABELS[savedRoom.status] || savedRoom.status}</span>
-                        </span>
-                        <span className="shrink-0 text-xs font-bold text-indigo-600">{formatSavedAt(savedRoom.updatedAt || savedRoom.lastOpenedAt || savedRoom.createdAt)}</span>
-                      </button>
-                    ))}
-                    {!recentRoomsLoading && recentRooms.length === 0 && (
-                      <p className="rounded-xl bg-slate-50 px-3 py-3 text-sm text-slate-500">이어갈 수업이 아직 없습니다.</p>
-                    )}
-                  </div>
-                </div>
-              )}
             </section>
             )}
 
@@ -494,6 +562,7 @@ export default function AdminPage() {
   const [authModal, setAuthModal] = useState(null);
   const [recentRooms, setRecentRooms] = useState([]);
   const [recentRoomsLoading, setRecentRoomsLoading] = useState(false);
+  const [deletingRoomId, setDeletingRoomId] = useState("");
   const intervalRef = useRef(null);
   const aiHeartbeatRef = useRef(null);
   const finalizeTimerRef = useRef(null);
@@ -522,8 +591,7 @@ export default function AdminPage() {
         if (cancelled) return;
         const rooms = snapshot.docs
           .map((item) => ({ roomId: item.id, ...item.data() }))
-          .sort((a, b) => Number(b.updatedAt || b.lastOpenedAt || b.createdAt || 0) - Number(a.updatedAt || a.lastOpenedAt || a.createdAt || 0))
-          .slice(0, 5);
+          .sort((a, b) => Number(b.updatedAt || b.lastOpenedAt || b.createdAt || 0) - Number(a.updatedAt || a.lastOpenedAt || a.createdAt || 0));
         setRecentRooms(rooms);
       })
       .catch((err) => {
@@ -707,6 +775,25 @@ export default function AdminPage() {
   function joinAsStudent() {
     const code = joinCode.trim().toUpperCase();
     if (code) navigate(`/room/${code}`);
+  }
+
+  async function deleteSavedRoom(savedRoom) {
+    if (!authState.user?.uid || !savedRoom?.roomId || deletingRoomId) return;
+    const roomLabel = savedRoom.roomTitle || savedRoom.roomId;
+    const confirmed = window.confirm(`“${roomLabel}” 수업을 삭제할까요?\n\n학생 기록과 진행 상태가 함께 삭제되며 되돌릴 수 없습니다.`);
+    if (!confirmed) return;
+
+    setDeletingRoomId(savedRoom.roomId);
+    setActionError("");
+    try {
+      await deleteDoc(roomDocRef(authState.user.uid, savedRoom.roomId));
+      setRecentRooms((current) => current.filter((item) => item.roomId !== savedRoom.roomId));
+    } catch (err) {
+      setActionError(err.message || "저장된 수업을 삭제하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+      window.alert("수업을 삭제하지 못했습니다. 네트워크 연결을 확인한 뒤 다시 시도해 주세요.");
+    } finally {
+      setDeletingRoomId("");
+    }
   }
 
   async function updateStatus(status) {
@@ -1140,13 +1227,26 @@ export default function AdminPage() {
   }
 
   async function requestAiEvaluation(team) {
+    const inputQuality = assessStudentPlanQuality(team);
+    if (!inputQuality.valid) return makeClearlyInvalidAiEvaluation(team, inputQuality.reason);
+
+    const comparisonContext = activeTeamEntries
+      .filter(([, comparisonTeam]) => comparisonTeam !== team)
+      .map(([, comparisonTeam]) => summarizePlanForComparison(comparisonTeam))
+      .join("\n") || "비교할 다른 팀이 없습니다.";
     const prompt = [
-      "너는 청소년 창업 평가 위원이야.",
+      "너는 청소년 창업 수업의 성장 중심 평가 위원이야.",
+      "평가 대상은 전문 창업가가 아니라 아이디어를 처음 구체화하는 학생이다. 투자심사 수준의 완성도를 요구하지 말고, 학생이 표현한 가능성과 논리적 연결을 먼저 인정해.",
       "아래 사업계획을 14가지 팩터(F01~F14)에 대해 각각 '양호', '보통', '취약' 중 하나로 판정해.",
-      "입력 내용이 한 문장도 되지 않거나, 의미 없는 특수문자/반복문자/무작위 문자열이 대부분이거나, 사업 아이디어를 판단할 수 없을 정도로 지나치게 부실하면 모든 팩터를 반드시 '취약'으로 판정해.",
-      "부실 입력으로 전체 취약 처리할 때는 각 reason에 '사업계획 내용이 부족하거나 의미를 판단하기 어려워 취약으로 판정했습니다.'라고 써.",
-      "반드시 JSON만 출력해. 형식은 {\"factors\":{\"F01\":{\"grade\":\"양호\",\"reason\":\"한 줄 이유\"}},\"opinion\":\"1~2줄 총평\"}.",
+      "판정 기준: '양호'는 아이디어와 팩터의 연결이 구체적이거나 강점이 보이는 경우, '보통'은 의미 있는 아이디어가 있으나 설명이 짧거나 보완 여지가 있는 경우, '취약'은 해당 팩터가 명백히 빠졌거나 서로 모순되거나 실제 위험이 뚜렷한 경우다.",
+      "의미 있는 문장과 사업 아이디어가 확인되면 '보통'을 기본값으로 삼아라. 단지 설명이 짧거나 전문 용어가 없다는 이유만으로 '취약'을 주지 마라.",
+      "모든 팩터를 같은 등급으로 기계적으로 채우지 말고, 각 팀의 고객·문제·해결책·수익·홍보 내용에 근거해 강점과 보완점을 분별력 있게 나눠라. 다른 팀과 등급 개수를 억지로 맞추지는 마라.",
+      "현재 팀만의 구체적인 표현을 reason에 반영하고, 다른 팀의 이름이나 내용을 reason에 노출하지 마라.",
+      "이미 사전 검사를 통과한 유효한 학생 사업계획이므로 전체를 '취약'으로 판정해서는 안 된다.",
+      "반드시 JSON만 출력해. 형식은 {\"factors\":{\"F01\":{\"grade\":\"양호\",\"reason\":\"한 줄 이유\"}},\"opinion\":\"강점과 다음 보완점이 담긴 격려형 1~2줄 총평\"}.",
       `팩터: ${BUSINESS_FACTORS.map((factor) => `${factor.id} ${factor.name}: ${factor.description}`).join(" / ")}`,
+      `수업 내 다른 팀 요약(상대적인 구체성 판단에만 사용):\n${comparisonContext}`,
+      "평가할 현재 팀:",
       `팀명: ${team.teamName}`,
       `트렌드: ${team.trendCard?.title || "미선택"}`,
       `기술카드: ${team.techCard?.title || "미선택"}`,
@@ -1161,7 +1261,7 @@ export default function AdminPage() {
     ].join("\n");
 
     const response = await requestLetsurViaProxy(prompt);
-    return parseLetsurResponse(response);
+    return parseLetsurResponse(response, team);
   }
 
   async function requestLetsurViaProxy(prompt) {
@@ -1172,7 +1272,7 @@ export default function AdminPage() {
     });
   }
 
-  async function parseLetsurResponse(response) {
+  async function parseLetsurResponse(response, team) {
     if (!response.ok) {
       const errorText = await response.text().catch(() => "");
       const deployedHost = window.location.host;
@@ -1188,7 +1288,7 @@ export default function AdminPage() {
       : Array.isArray(content)
         ? content.map((part) => part?.text || part?.content || "").join("")
         : "{}";
-    return normalizeAiEvaluation(JSON.parse(stripJsonFence(text)));
+    return normalizeAiEvaluation(JSON.parse(stripJsonFence(text)), team);
   }
 
   if (!roomId) {
@@ -1208,7 +1308,9 @@ export default function AdminPage() {
           onOpenAuth={setAuthModal}
           recentRooms={recentRooms}
           recentRoomsLoading={recentRoomsLoading}
+          deletingRoomId={deletingRoomId}
           onResumeRoom={(savedRoomId) => navigate(`/admin/${savedRoomId}`)}
+          onDeleteRoom={deleteSavedRoom}
         />
         {authModal && <AuthModal mode={authModal} onClose={() => setAuthModal(null)} />}
       </>
@@ -1606,7 +1708,8 @@ function AiConfirmModal({ onCancel, onConfirm }) {
       <article className="w-full max-w-md rounded-lg bg-white p-6 text-center shadow-lift">
         <p className="text-sm font-bold text-indigo-600">사업계획 AI 평가</p>
         <h2 className="mt-2 text-3xl font-black">AI 분석을 시작할까요?</h2>
-        <p className="mt-3 text-sm leading-6 text-slate-600">시작하면 제출된 사업계획을 기준으로 비즈니스 전문 AI 평가가 진행됩니다.</p>
+        <p className="mt-3 text-sm leading-6 text-slate-600">학생의 학습 단계와 아이디어의 발전 가능성을 중심으로 평가합니다. 의미 있는 계획은 보통을 기본으로 강점을 인정하고, 팀별 구체성에 따라 결과를 다르게 판정합니다.</p>
+        <p className="mt-3 rounded-xl bg-amber-50 px-4 py-3 text-left text-xs font-bold leading-5 text-amber-800">한 줄 미만의 입력이나 의미 없는 단어 반복처럼 내용을 판단할 수 없는 경우에만 전체 취약으로 처리합니다.</p>
         <div className="mt-5 grid grid-cols-2 gap-2">
           <button type="button" onClick={onCancel} className="touch-button rounded-lg bg-slate-100 px-4 py-3 font-black text-slate-700">취소</button>
           <button type="button" onClick={onConfirm} className="touch-button rounded-lg bg-indigo-600 px-4 py-3 font-black text-white">시작</button>
@@ -1937,6 +2040,49 @@ function stripJsonFence(text) {
   return String(text || "").replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```$/i, "").trim();
 }
 
+function getStudentPlanCoreParts(team) {
+  return [
+    team.idea?.serviceName,
+    team.idea?.problem,
+    team.idea?.solution,
+    team.idea?.product,
+    team.idea?.tagline
+  ].map((value) => String(value || "").trim()).filter(Boolean);
+}
+
+function assessStudentPlanQuality(team) {
+  const parts = getStudentPlanCoreParts(team);
+  const text = parts.join(" ");
+  const compact = text.replace(/[^\p{L}\p{N}]/gu, "");
+  const tokens = (text.toLowerCase().match(/[\p{L}\p{N}]+/gu) || []).filter((token) => token.length >= 2);
+  const counts = tokens.reduce((result, token) => ({ ...result, [token]: (result[token] || 0) + 1 }), {});
+  const dominantTokenCount = Math.max(0, ...Object.values(counts));
+  const dominantTokenRatio = tokens.length ? dominantTokenCount / tokens.length : 0;
+  const uniqueCharacters = new Set(compact).size;
+  const repeatedCharacters = /(.)\1{7,}/u.test(compact);
+  const lowVarietyRepetition = compact.length >= 18 && uniqueCharacters <= 4;
+  const repeatedWords = tokens.length >= 5 && dominantTokenRatio >= 0.6;
+
+  if (compact.length < 30) {
+    return { valid: false, reason: "사업 아이디어를 판단할 수 있는 문장이 한 줄 분량에 미치지 못했습니다.", length: compact.length };
+  }
+  if (repeatedCharacters || lowVarietyRepetition || repeatedWords) {
+    return { valid: false, reason: "같은 문자나 단어의 반복이 대부분이라 사업 아이디어의 의미를 판단하기 어렵습니다.", length: compact.length };
+  }
+  return { valid: true, reason: "", length: compact.length };
+}
+
+function summarizePlanForComparison(team) {
+  const idea = team.idea || {};
+  return [
+    `${team.teamName || "이름 없는 팀"}`,
+    idea.serviceName || "서비스명 미작성",
+    idea.problem || "문제 미작성",
+    idea.solution || "해결책 미작성",
+    (idea.customers || []).join(", ") || "고객 미작성"
+  ].join(" | ").slice(0, 420);
+}
+
 function makeAiEvaluationMessage(evaluations = {}) {
   const values = Object.values(evaluations);
   const fallbackCount = values.filter((evaluation) => String(evaluation?.model || "").includes("fallback")).length;
@@ -1947,7 +2093,8 @@ function makeAiEvaluationMessage(evaluations = {}) {
   return `AI 사업계획서 평가가 완료되었습니다. 팀 패널에서 14개 지표와 1~2줄 종합의견을 확인하세요.`;
 }
 
-function normalizeAiEvaluation(raw) {
+function normalizeAiEvaluation(raw, team) {
+  const quality = assessStudentPlanQuality(team || {});
   const factors = {};
   for (const factor of BUSINESS_FACTORS) {
     const item = raw?.factors?.[factor.id] || {};
@@ -1957,11 +2104,39 @@ function normalizeAiEvaluation(raw) {
       reason: String(item.reason || factor.description).slice(0, 80)
     };
   }
+
+  if (quality.valid) {
+    const weakFactors = BUSINESS_FACTORS.filter((factor) => factors[factor.id].grade === "취약");
+    const maximumWeakFactors = quality.length >= 120 ? 3 : 5;
+    weakFactors.slice(maximumWeakFactors).forEach((factor) => {
+      factors[factor.id] = {
+        grade: "보통",
+        reason: `${factor.name}은 학생 아이디어의 발전 가능성을 반영해 보통으로 판정했습니다.`
+      };
+    });
+  }
+
   return {
     factors,
     opinion: String(raw?.opinion || "사업계획의 강점과 보완점을 바탕으로 경영 시뮬레이션을 진행합니다.").slice(0, 160),
     evaluatedAt: Date.now(),
     model: "gemini-2.5-pro-via-letsur"
+  };
+}
+
+function makeClearlyInvalidAiEvaluation(team, reason) {
+  const factors = Object.fromEntries(BUSINESS_FACTORS.map((factor) => [
+    factor.id,
+    {
+      grade: "취약",
+      reason: "사업계획 내용이 부족하거나 반복되어 의미를 판단하기 어려워 취약으로 판정했습니다."
+    }
+  ]));
+  return {
+    factors,
+    opinion: `${team.teamName || "이 팀"}의 입력은 ${reason} 문제·고객·해결 방법을 문장으로 보완하면 다시 평가받을 수 있습니다.`.slice(0, 160),
+    evaluatedAt: Date.now(),
+    model: "student-plan-quality-check"
   };
 }
 

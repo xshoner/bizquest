@@ -15,11 +15,278 @@
   --card: rgba(255, 255, 255, 0.86);
 }
 
+/* Saved lesson navigation and readability refinement */
+:root {
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  font-family: "Pretendard Variable", Pretendard, "SUIT Variable", SUIT, "Noto Sans KR", Inter, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  letter-spacing: -0.012em;
+  -webkit-font-smoothing: antialiased;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+summary:focus-visible {
+  outline: 3px solid rgba(23, 92, 255, 0.32);
+  outline-offset: 3px;
+}
+
+.landing-nav-account {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.landing-nav-account .teacher-auth-actions,
+.landing-nav-account .teacher-auth-badge {
+  margin-left: 0;
+}
+
+.saved-rooms-menu {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.saved-rooms-trigger {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid rgba(23, 92, 255, 0.15);
+  border-radius: 12px;
+  background: linear-gradient(180deg, #ffffff, #f3f7ff);
+  padding: 8px 10px;
+  color: #183b8f;
+  font-size: 13px;
+  font-weight: 950;
+  box-shadow: 0 8px 20px rgba(23, 92, 255, 0.08);
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.saved-rooms-trigger:hover,
+.saved-rooms-trigger-open {
+  border-color: rgba(23, 92, 255, 0.35);
+  box-shadow: 0 12px 28px rgba(23, 92, 255, 0.14);
+  transform: translateY(-1px);
+}
+
+.saved-rooms-trigger b,
+.saved-rooms-count {
+  display: inline-grid;
+  min-width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 999px;
+  background: #175cff;
+  padding: 0 6px;
+  color: white;
+  font-size: 11px;
+  font-weight: 1000;
+}
+
+.saved-rooms-trigger-open .saved-rooms-chevron {
+  transform: rotate(180deg);
+}
+
+.saved-rooms-chevron {
+  transition: transform 160ms ease;
+}
+
+.saved-rooms-popover {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 12px);
+  z-index: 60;
+  width: min(430px, calc(100vw - 28px));
+  overflow: hidden;
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 26px 74px rgba(15, 23, 42, 0.22);
+  backdrop-filter: blur(22px);
+  animation: saved-room-popover-in 160ms ease-out;
+}
+
+@keyframes saved-room-popover-in {
+  from { opacity: 0; transform: translateY(-6px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.saved-rooms-popover-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  border-bottom: 1px solid #e9eef8;
+  background: linear-gradient(135deg, #f7fbff, #eef5ff);
+  padding: 16px 17px 14px;
+}
+
+.saved-rooms-popover-head strong,
+.saved-rooms-popover-head small {
+  display: block;
+}
+
+.saved-rooms-popover-head strong {
+  color: #0b1b46;
+  font-size: 15px;
+  font-weight: 1000;
+}
+
+.saved-rooms-popover-head small {
+  margin-top: 3px;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.saved-rooms-list {
+  display: grid;
+  max-height: min(58vh, 470px);
+  gap: 7px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 10px;
+}
+
+.saved-room-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 38px;
+  align-items: stretch;
+  gap: 6px;
+  border: 1px solid #e8edf6;
+  border-radius: 14px;
+  background: #ffffff;
+  transition: border-color 150ms ease, background 150ms ease;
+}
+
+.saved-room-item:hover {
+  border-color: #bfd0ff;
+  background: #f7f9ff;
+}
+
+.saved-room-open {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  background: transparent;
+  padding: 11px 7px 11px 11px;
+  text-align: left;
+}
+
+.saved-room-icon {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #dff6ff, #e8ebff);
+  color: #175cff;
+}
+
+.saved-room-copy {
+  min-width: 0;
+}
+
+.saved-room-copy b,
+.saved-room-copy small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.saved-room-copy b {
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 950;
+}
+
+.saved-room-copy small {
+  margin-top: 3px;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.saved-room-open time {
+  color: #3159d9;
+  font-size: 10px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.saved-room-delete {
+  display: grid;
+  width: 34px;
+  min-height: 38px;
+  align-self: center;
+  place-items: center;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #94a3b8;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.saved-room-delete:hover:not(:disabled) {
+  background: #fff0f2;
+  color: #dc2626;
+}
+
+.saved-room-delete:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.saved-room-spinner {
+  width: 15px;
+  height: 15px;
+  border: 2px solid #cbd5e1;
+  border-top-color: #175cff;
+  border-radius: 999px;
+  animation: saved-room-spin 700ms linear infinite;
+}
+
+@keyframes saved-room-spin {
+  to { transform: rotate(360deg); }
+}
+
+.saved-rooms-empty {
+  margin: 0;
+  border-radius: 13px;
+  background: #f8fafc;
+  padding: 24px 16px;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.7;
+  text-align: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .saved-rooms-popover,
+  .saved-room-spinner {
+    animation: none;
+  }
+}
+
 body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  font-family: Pretendard, Inter, system-ui, sans-serif;
+  font-family: "Pretendard Variable", Pretendard, "SUIT Variable", SUIT, "Noto Sans KR", Inter, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   background:
     radial-gradient(circle at 14% 8%, rgba(91, 78, 230, 0.08), transparent 24%),
     radial-gradient(circle at 84% 20%, rgba(32, 199, 201, 0.10), transparent 22%),
@@ -4107,5 +4374,119 @@ select {
   .event-card-visual {
     justify-self: center;
     width: min(58vw, 240px);
+  }
+}
+
+/* Keep the account and saved-lessons controls in the top row on compact screens. */
+@media (max-width: 900px) {
+  .landing-nav {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    flex-direction: initial;
+    gap: 9px 10px;
+  }
+
+  .landing-logo {
+    min-width: 0;
+  }
+
+  .landing-logo strong {
+    overflow: hidden;
+    font-size: 20px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .landing-logo span {
+    width: 38px;
+    height: 38px;
+  }
+
+  .landing-nav-account {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .landing-nav-actions {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    overflow-x: auto;
+    padding: 2px 0;
+    scrollbar-width: none;
+  }
+
+  .landing-nav-actions::-webkit-scrollbar {
+    display: none;
+  }
+
+  .saved-rooms-popover {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    top: 72px;
+    width: auto;
+  }
+}
+
+@media (max-width: 560px) {
+  .landing-nav {
+    padding: 10px;
+  }
+
+  .saved-rooms-trigger {
+    width: 40px;
+    padding: 8px;
+    justify-content: center;
+  }
+
+  .saved-rooms-trigger > span,
+  .saved-rooms-trigger > .saved-rooms-chevron {
+    display: none;
+  }
+
+  .saved-rooms-trigger b {
+    position: absolute;
+    right: -5px;
+    top: -6px;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 4px;
+    font-size: 9px;
+  }
+
+  .teacher-auth-badge > span {
+    display: none;
+  }
+
+  .teacher-auth-badge {
+    background: transparent;
+    padding: 0;
+  }
+
+  .teacher-auth-badge button {
+    min-height: 40px;
+    background: #061336;
+    padding: 8px 10px;
+  }
+
+  .teacher-auth-actions {
+    gap: 4px;
+  }
+
+  .teacher-auth-actions button {
+    min-height: 40px;
+    padding: 8px 9px;
+    font-size: 12px;
+  }
+
+  .saved-room-open {
+    grid-template-columns: 30px minmax(0, 1fr);
+  }
+
+  .saved-room-open time {
+    display: none;
   }
 }
