@@ -5203,3 +5203,234 @@ select {
     print-color-adjust: exact;
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* Phase timer, progress panel, step indicator, sound toggle           */
+/* ------------------------------------------------------------------ */
+.progress-panel,
+.timer-panel {
+  border-radius: 18px;
+  background: #fff;
+  padding: 14px 16px;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.1);
+}
+
+.progress-panel-title {
+  font-size: 12px;
+  font-weight: 1000;
+  letter-spacing: 0.04em;
+  color: #475569;
+}
+
+.progress-count {
+  font-size: 14px;
+  font-weight: 1000;
+  color: #3730a3;
+}
+
+.progress-count-done {
+  color: #047857;
+}
+
+.progress-bar {
+  margin-top: 8px;
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e2e8f0;
+}
+
+.progress-bar b {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #4f46e5, #06b6d4 60%, #10b981);
+  transition: width 500ms cubic-bezier(0.2, 0.9, 0.2, 1);
+}
+
+.progress-pending-chip {
+  border-radius: 999px;
+  background: #fff7ed;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 900;
+  color: #c2410c;
+  box-shadow: inset 0 0 0 1px #fed7aa;
+}
+
+.timer-preset {
+  border-radius: 999px;
+  background: #eef2ff;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 900;
+  color: #3730a3;
+}
+
+.timer-preset:hover {
+  background: #e0e7ff;
+}
+
+.timer-preset-primary {
+  background: #4f46e5;
+  color: #fff;
+}
+
+.timer-preset-primary:hover {
+  background: #4338ca;
+}
+
+.phase-timer {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  overflow: hidden;
+  border-radius: 16px;
+  background: #0f172a;
+  padding: 12px 16px 16px;
+  color: #fff;
+}
+
+.phase-timer-icon {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.phase-timer-body b {
+  display: block;
+  font-size: 30px;
+  font-weight: 1000;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.phase-timer-body small {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.phase-timer-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 5px;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.phase-timer-bar b {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #22d3ee, #a78bfa);
+  transition: width 1s linear;
+}
+
+.phase-timer-warning {
+  background: #9f1239;
+  animation: phase-timer-blink 1s steps(2, start) infinite;
+}
+
+.phase-timer-warning .phase-timer-bar b {
+  background: #fda4af;
+}
+
+.phase-timer-expired {
+  background: #475569;
+}
+
+.phase-timer-compact {
+  grid-template-columns: auto auto;
+  justify-content: start;
+  margin-top: 8px;
+  padding: 6px 12px 10px;
+  border-radius: 12px;
+}
+
+.phase-timer-compact .phase-timer-icon {
+  width: 26px;
+  height: 26px;
+}
+
+.phase-timer-compact .phase-timer-body b {
+  font-size: 18px;
+}
+
+@keyframes phase-timer-blink {
+  50% {
+    filter: brightness(1.35);
+  }
+}
+
+.team-member-chip-pending {
+  box-shadow: inset 0 0 0 2px #fdba74;
+}
+
+.team-member-pending-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #f97316;
+  animation: ticker-pulse 1.4s ease-in-out infinite;
+}
+
+/* student 8-step indicator */
+.step-indicator {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 4px;
+  margin-top: 8px;
+  list-style: none;
+  padding: 0;
+}
+
+.step-indicator li {
+  position: relative;
+  display: grid;
+  height: 6px;
+  border-radius: 999px;
+  background: #e2e8f0;
+}
+
+.step-indicator li span {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 0;
+}
+
+.step-indicator .step-done {
+  background: #10b981;
+}
+
+.step-indicator .step-current {
+  background: linear-gradient(90deg, #4f46e5, #06b6d4);
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.18);
+}
+
+.sound-toggle {
+  display: inline-grid;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  place-items: center;
+  border-radius: 999px;
+  background: #fff;
+  color: #475569;
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.1);
+}
+
+.sound-toggle[aria-pressed="true"] {
+  background: #fee2e2;
+  color: #b91c1c;
+}

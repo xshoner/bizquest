@@ -75,6 +75,8 @@ import processRoadmapImage from "../images/landing-process-roadmap.webp";
 import { AiEvaluationShowcase, EventCardVisual, FanfareOnResult, ResultFinalizingShowcase, ResultFireworks } from "../components/shared/Effects.jsx";
 import { AssetChangeSummary, AssetTrendChart, gradeClassName } from "../components/shared/AssetCharts.jsx";
 import { playWhoosh } from "../lib/audio.js";
+import { PHASE_TIMER_PRESETS_MIN, PhaseTimerDisplay } from "../components/shared/PhaseTimer.jsx";
+import { buildFullCsv, buildRoomJson, downloadTextFile, safeFileName } from "../lib/exportReport.js";
 
 const PHASES = [
   STATUSES.WAITING,
@@ -833,8 +835,34 @@ export default function AdminPage() {
     }
     await updateRoom({
       status,
+      phaseTimer: null,
       sysMessage: `${STATUS_LABELS[status]} 단계로 이동했습니다.`
     });
+  }
+
+  /** Teacher-controlled countdown shown on every screen. `minutes` null → stop. */
+  async function setPhaseTimer(minutes, { extend = false } = {}) {
+    if (!roomId) return;
+    if (minutes === null) {
+      await updateRoom({ phaseTimer: null, sysMessage: "타이머를 종료했습니다." }).catch((err) => reportActionError(err, "타이머를 종료하지 못했습니다."));
+      return;
+    }
+    const now = Date.now();
+    const current = room?.phaseTimer;
+    const base = extend && current?.endsAt && Number(current.endsAt) > now ? Number(current.endsAt) : now;
+    const durationMs = extend && current?.durationMs ? Number(current.durationMs) + minutes * 60000 : minutes * 60000;
+    await updateRoom({
+      phaseTimer: { startedAt: extend && current?.startedAt ? current.startedAt : now, endsAt: base + minutes * 60000, durationMs, phase: room?.status || null },
+      sysMessage: extend ? `타이머를 ${minutes}분 연장했습니다.` : `${STATUS_LABELS[room?.status] || "현재"} 단계 타이머 ${minutes}분을 시작했습니다.`
+    }).catch((err) => reportActionError(err, "타이머를 설정하지 못했습니다."));
+  }
+
+  function exportCsv() {
+    downloadTextFile(`${safeFileName(room?.roomTitle)}_${roomId}_결과.csv`, buildFullCsv(room), "text/csv");
+  }
+
+  function exportJson() {
+    downloadTextFile(`${safeFileName(room?.roomTitle)}_${roomId}_백업.json`, buildRoomJson(room), "application/json");
   }
 
   async function handlePhaseClick(status) {
@@ -881,6 +909,7 @@ export default function AdminPage() {
     await updateRoom({
       resultFinalizing: true,
       resultFinalizeAt,
+      phaseTimer: null,
       simulationRunning: false,
       simulationOwner: null,
       simulationHeartbeatAt: 0,
@@ -1109,6 +1138,7 @@ export default function AdminPage() {
       simulationOwner: adminSessionIdRef.current,
       simulationHeartbeatAt: Date.now(),
       status: STATUSES.SIMULATION,
+      phaseTimer: null,
       sysMessage: "AI 경영 시뮬레이션을 시작합니다. 모든 팀은 기본 자산(C레벨 다양성 보너스 반영)에 투자 유치금을 더해 출발합니다."
     });
   }
@@ -1419,6 +1449,10 @@ export default function AdminPage() {
         </div>
       )}
       <PhaseRail currentStatus={room.status} onPhaseClick={handlePhaseClick} />
+      <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+        <PhaseProgressPanel room={room} teams={teams} students={students} />
+        <PhaseTimerControl timer={room.phaseTimer} onStart={(minutes) => setPhaseTimer(minutes)} onExtend={() => setPhaseTimer(1, { extend: true })} onStop={() => setPhaseTimer(null)} />
+      </div>
       {room.resultFinalizing && <ResultFinalizingShowcase />}
       <FanfareOnResult status={room.status} />
       <ResultFireworks status={room.status} />
@@ -1453,10 +1487,18 @@ export default function AdminPage() {
               {Object.values(students).filter((student) => !student.team).length === 0 && <p className="text-sm text-slate-500">대기 중인 학생이 없습니다.</p>}
             </div>
           </div>
-          {room.status === STATUSES.RESULT && <button onClick={() => window.print()} className="print:hidden touch-button inline-flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-3 font-bold text-white"><FileDown size={18} /> 수업 결과 PDF 저장</button>}
+          <div className="print:hidden rounded-lg bg-white p-5 shadow-lift">
+            <h2 className="flex items-center gap-2 font-black"><FileDown size={18} /> 내보내기</h2>
+            <p className="mt-1 text-xs font-bold text-slate-500">{room.status === STATUSES.RESULT ? "최종 결과를 파일로 저장합니다." : "결과 CSV는 최종 결과 단계에서 저장할 수 있습니다. JSON 백업은 언제든 가능합니다."}</p>
+            <div className="mt-3 grid gap-2">
+              <button onClick={() => window.print()} disabled={room.status !== STATUSES.RESULT} className="touch-button inline-flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-3 font-bold text-white disabled:bg-slate-200 disabled:text-slate-400"><FileDown size={18} /> PDF 저장(인쇄)</button>
+              <button onClick={exportCsv} disabled={room.status !== STATUSES.RESULT} className="touch-button inline-flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-3 font-bold text-white disabled:bg-slate-200 disabled:text-slate-400"><FileText size={18} /> 결과 CSV(엑셀)</button>
+              <button onClick={exportJson} className="touch-button inline-flex w-full items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 py-3 font-bold text-white"><FileText size={18} /> 전체 데이터 JSON 백업</button>
+            </div>
+          </div>
         </aside>
         <div className="print-main space-y-5">
-          <TeamGrid teams={teams} students={students} onOpenStudentMenu={(uid, teamKey) => setStudentMenu({ uid, teamKey, mode: "assigned" })} onRenameTeam={renameTeam} onAddTeam={addTeam} onDeleteTeam={deleteTeam} onLockPlan={lockBusinessPlan} onOpenPlan={setPlanTeam} onOpenOpinion={setOpinionTeam} />
+          <TeamGrid roomStatus={room.status} teams={teams} students={students} onOpenStudentMenu={(uid, teamKey) => setStudentMenu({ uid, teamKey, mode: "assigned" })} onRenameTeam={renameTeam} onAddTeam={addTeam} onDeleteTeam={deleteTeam} onLockPlan={lockBusinessPlan} onOpenPlan={setPlanTeam} onOpenOpinion={setOpinionTeam} />
           {investmentChartVisible && <InvestmentChart teams={teams} />}
           {room.status === STATUSES.RESULT && (
             <div ref={resultBoardRef}>
@@ -1492,7 +1534,7 @@ function getStudentOrigin(localNetworkHost) {
   return origin;
 }
 
-function TeamGrid({ teams, students, onOpenStudentMenu, onRenameTeam, onAddTeam, onDeleteTeam, onLockPlan, onOpenPlan, onOpenOpinion }) {
+function TeamGrid({ roomStatus, teams, students, onOpenStudentMenu, onRenameTeam, onAddTeam, onDeleteTeam, onLockPlan, onOpenPlan, onOpenOpinion }) {
   return (
     <section>
       <div className="mb-3 flex items-center justify-between gap-3">
@@ -1525,13 +1567,20 @@ function TeamGrid({ teams, students, onOpenStudentMenu, onRenameTeam, onAddTeam,
                 </div>
               )}
               <div className="mt-3 flex flex-wrap gap-2">
-                {members.map((student) => (
-                  <button key={student.uid} onClick={() => onOpenStudentMenu(student.uid, key)} className={`team-member-chip ${team.leaderId === student.uid ? "team-member-chip-leader" : ""}`}>
-                    {team.leaderId === student.uid && <Crown size={14} className="text-amber-500" />}
-                    {student.nickname}
-                    {student.cLevelResult?.key && <span className={`c-level-mini-badge c-level-mini-${student.cLevelResult.key}`}>{student.cLevelResult.key}</span>}
-                  </button>
-                ))}
+                {members.map((student) => {
+                  const pendingDiagnosis = roomStatus === STATUSES.C_LEVEL && !student.cLevelResult?.key;
+                  const pendingInvestment = roomStatus === STATUSES.INVESTMENT && !student.investmentSubmitted;
+                  const investmentDone = [STATUSES.INVESTMENT, STATUSES.SIMULATION, STATUSES.RESULT].includes(roomStatus) && student.investmentSubmitted;
+                  return (
+                    <button key={student.uid} onClick={() => onOpenStudentMenu(student.uid, key)} className={`team-member-chip ${team.leaderId === student.uid ? "team-member-chip-leader" : ""} ${pendingDiagnosis || pendingInvestment ? "team-member-chip-pending" : ""}`} title={pendingDiagnosis ? "자가진단 미완료" : pendingInvestment ? "투자 미확정" : investmentDone ? "투자 확정" : undefined}>
+                      {team.leaderId === student.uid && <Crown size={14} className="text-amber-500" />}
+                      {student.nickname}
+                      {student.cLevelResult?.key && <span className={`c-level-mini-badge c-level-mini-${student.cLevelResult.key}`}>{student.cLevelResult.key}</span>}
+                      {investmentDone && <CheckCircle2 size={13} className="text-emerald-600" aria-label="투자 확정" />}
+                      {(pendingDiagnosis || pendingInvestment) && <span className="team-member-pending-dot" aria-hidden="true" />}
+                    </button>
+                  );
+                })}
                 {members.length === 0 && <span className="text-sm text-slate-400">팀원을 기다리는 중</span>}
               </div>
               <div className={`mt-4 rounded-lg p-3 text-sm ${cardSelectionComplete ? "admin-card-selection-complete" : "bg-slate-50 text-slate-600"}`}>
@@ -1566,6 +1615,123 @@ function TeamGrid({ teams, students, onOpenStudentMenu, onRenameTeam, onAddTeam,
     </section>
   );
 }
+/** Per-phase completion summary with the names of students/teams still pending. */
+function PhaseProgressPanel({ room, teams, students }) {
+  const [showPending, setShowPending] = useState(false);
+  const assigned = Object.values(students).filter((student) => student.team && teams[student.team]);
+  const activeTeams = getTeamEntries(teams).filter(([key]) => assigned.some((student) => student.team === key));
+  let title = "";
+  let done = 0;
+  let total = 0;
+  let pending = [];
+
+  switch (room.status) {
+    case STATUSES.WAITING: {
+      title = "팀 배정";
+      total = Object.keys(students).length;
+      done = assigned.length;
+      pending = Object.values(students).filter((student) => !student.team).map((student) => student.nickname);
+      break;
+    }
+    case STATUSES.C_LEVEL: {
+      title = "C레벨 자가진단 완료";
+      total = assigned.length;
+      done = assigned.filter((student) => student.cLevelResult?.key).length;
+      pending = assigned.filter((student) => !student.cLevelResult?.key).map((student) => student.nickname);
+      break;
+    }
+    case STATUSES.CARD_SELECT: {
+      title = "카드 선택 완료 팀";
+      total = activeTeams.length;
+      done = activeTeams.filter(([, team]) => team.trendCard && team.techCard).length;
+      pending = activeTeams.filter(([, team]) => !(team.trendCard && team.techCard)).map(([, team]) => team.teamName);
+      break;
+    }
+    case STATUSES.IDEATION:
+    case STATUSES.AI_EVALUATION: {
+      title = room.status === STATUSES.IDEATION ? "사업계획 제출 · 확정" : "사업계획 확정";
+      total = activeTeams.length;
+      done = activeTeams.filter(([, team]) => team.ideaLocked).length;
+      pending = activeTeams
+        .filter(([, team]) => !team.ideaLocked)
+        .map(([, team]) => `${team.teamName}${team.idea && team.ideaSubmitted !== false ? " (확정 대기)" : " (미제출)"}`);
+      break;
+    }
+    case STATUSES.INVESTMENT: {
+      title = "투자 확정";
+      total = assigned.length;
+      done = assigned.filter((student) => student.investmentSubmitted).length;
+      pending = assigned.filter((student) => !student.investmentSubmitted).map((student) => student.nickname);
+      break;
+    }
+    default:
+      return (
+        <div className="progress-panel">
+          <p className="progress-panel-title">진행 현황</p>
+          <p className="text-sm font-bold text-slate-500">{room.status === STATUSES.SIMULATION ? `${room.currentMonth || 0} / ${SIMULATION_MONTHS}개월 진행` : "수업이 완료되었습니다."}</p>
+          {room.status === STATUSES.SIMULATION && (
+            <div className="progress-bar"><b style={{ width: `${Math.min(100, ((room.currentMonth || 0) / SIMULATION_MONTHS) * 100)}%` }} /></div>
+          )}
+        </div>
+      );
+  }
+
+  const percent = total ? Math.round((done / total) * 100) : 0;
+  return (
+    <div className="progress-panel">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="progress-panel-title">{title}</p>
+        <b className={`progress-count ${total && done === total ? "progress-count-done" : ""}`}>{done} / {total}{total && done === total ? " · 모두 완료" : ""}</b>
+      </div>
+      <div className="progress-bar"><b style={{ width: `${percent}%` }} /></div>
+      {pending.length > 0 && (
+        <div className="mt-2">
+          <button type="button" onClick={() => setShowPending((current) => !current)} className="text-xs font-black text-indigo-700">
+            미완료 {pending.length}명/팀 {showPending ? "접기" : "보기"}
+          </button>
+          {showPending && (
+            <div className="mt-2 flex flex-wrap gap-1">
+              {pending.map((name) => <span key={name} className="progress-pending-chip">{name}</span>)}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PhaseTimerControl({ timer, onStart, onExtend, onStop }) {
+  const active = Boolean(timer?.endsAt);
+  return (
+    <div className="timer-panel print:hidden">
+      <div className="flex items-center justify-between gap-2">
+        <p className="progress-panel-title">단계 타이머</p>
+        {active && <button type="button" onClick={onStop} className="rounded-full bg-rose-50 px-3 py-1 text-xs font-black text-rose-700 ring-1 ring-rose-200">종료</button>}
+      </div>
+      {active ? (
+        <>
+          <PhaseTimerDisplay timer={timer} />
+          <div className="mt-2 flex flex-wrap gap-2">
+            <button type="button" onClick={onExtend} className="timer-preset">+1분</button>
+            {PHASE_TIMER_PRESETS_MIN.map((minutes) => (
+              <button key={minutes} type="button" onClick={() => onStart(minutes)} className="timer-preset">{minutes}분 재시작</button>
+            ))}
+          </div>
+        </>
+      ) : (
+        <>
+          <p className="text-xs font-bold text-slate-500">학생 화면 상단에 남은 시간이 표시됩니다. 단계를 바꾸면 자동으로 꺼집니다.</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {PHASE_TIMER_PRESETS_MIN.map((minutes) => (
+              <button key={minutes} type="button" onClick={() => onStart(minutes)} className="timer-preset timer-preset-primary">{minutes}분 시작</button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function PhaseRail({ currentStatus, onPhaseClick }) {
   return (
     <nav className="phase-rail mt-5" aria-label="진행 단계">

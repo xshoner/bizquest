@@ -1,6 +1,6 @@
 ﻿import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { Award, Check, CircleDollarSign, Crown, Lightbulb, Pencil, RotateCcw, Send, TrendingUp } from "lucide-react";
+import { Award, Check, CircleDollarSign, Crown, Lightbulb, Pencil, RotateCcw, Send, TrendingUp, Volume2, VolumeX } from "lucide-react";
 import { auth, onAuthStateChanged, setDoc, signInAnonymously } from "../firebase.js";
 import {
   C_LEVEL_KEYS,
@@ -20,7 +20,8 @@ import { INVESTMENT_BUDGET, INVESTMENT_STEP, TEAM_BASE_ASSET, formatWon, getAsse
 import { studentDocRef, useRoom } from "../hooks/useRoom.js";
 import { updateOwnStudent, updateOwnTeam } from "../lib/roomStore.js";
 import { getEventImage, getTechCardImage, getTrendCardImage } from "../lib/assets.js";
-import { playWhoosh } from "../lib/audio.js";
+import { isSoundMuted, playWhoosh, setSoundMuted } from "../lib/audio.js";
+import { PhaseTimerDisplay } from "../components/shared/PhaseTimer.jsx";
 import { AiEvaluationShowcase, EventCardVisual, FanfareOnResult, ResultFinalizingShowcase, ResultFireworks } from "../components/shared/Effects.jsx";
 import { AssetChangeSummary, AssetTrendChart, gradeClassName } from "../components/shared/AssetCharts.jsx";
 
@@ -204,6 +205,50 @@ function MobileFrame({ children }) {
   return <section className="mx-auto min-h-screen max-w-md bg-[#f5f7fb] px-4 py-5">{children}</section>;
 }
 
+const STUDENT_PHASES = [
+  STATUSES.WAITING,
+  STATUSES.C_LEVEL,
+  STATUSES.CARD_SELECT,
+  STATUSES.IDEATION,
+  STATUSES.AI_EVALUATION,
+  STATUSES.INVESTMENT,
+  STATUSES.SIMULATION,
+  STATUSES.RESULT
+];
+
+/** Eight-step progress strip: done steps filled, current step highlighted. */
+function StepIndicator({ status }) {
+  const currentIndex = Math.max(0, STUDENT_PHASES.indexOf(status));
+  return (
+    <ol className="step-indicator" aria-label={`전체 8단계 중 ${currentIndex + 1}단계`}>
+      {STUDENT_PHASES.map((phase, index) => (
+        <li
+          key={phase}
+          className={index < currentIndex ? "step-done" : index === currentIndex ? "step-current" : ""}
+          aria-current={index === currentIndex ? "step" : undefined}
+          title={STATUS_LABELS[phase]}
+        >
+          <span>{index + 1}</span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function SoundToggle() {
+  const [muted, setMuted] = useState(() => isSoundMuted());
+  function toggle() {
+    const next = !muted;
+    setSoundMuted(next);
+    setMuted(next);
+  }
+  return (
+    <button type="button" onClick={toggle} className="sound-toggle" aria-pressed={muted} title={muted ? "효과음 켜기" : "효과음 끄기"}>
+      {muted ? <VolumeX size={16} /> : <Volume2 size={16} />}
+    </button>
+  );
+}
+
 function StudentHeader({ room, uid, student }) {
   const myTeam = room.teams?.[student.team];
   const isLeader = myTeam?.leaderId === uid;
@@ -232,7 +277,12 @@ function StudentHeader({ room, uid, student }) {
 
   return (
     <header className="sticky top-0 z-10 -mx-4 mb-4 border-b border-slate-200 bg-[#f5f7fb]/95 px-4 py-3 backdrop-blur">
-      <p className="text-xs font-bold text-indigo-600">{room.roomTitle} · {STATUS_LABELS[room.status]}</p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="min-w-0 truncate text-xs font-bold text-indigo-600">{room.roomTitle} · {STATUS_LABELS[room.status]}</p>
+        <SoundToggle />
+      </div>
+      <StepIndicator status={room.status} />
+      <PhaseTimerDisplay timer={room.phaseTimer} compact />
       <div className="mt-1 flex items-center justify-between gap-3">
         <div className="student-name-wrap">
           <h1 className="min-w-0 truncate text-xl font-black">{student.nickname}</h1>
