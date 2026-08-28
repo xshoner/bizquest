@@ -2,6 +2,7 @@ import { getApps, initializeApp } from "https://www.gstatic.com/firebasejs/11.1.
 import {
   collection,
   deleteDoc,
+  deleteField,
   doc,
   getDoc,
   getDocs,
@@ -39,11 +40,19 @@ export const db = getFirestore(app);
 export const auth = getAuth(app);
 export const secondaryAuth = getAuth(secondaryApp);
 
+/** Returns a fresh Firebase ID token for the signed-in user (used to authenticate server calls). */
+export async function getCurrentIdToken(forceRefresh = false) {
+  const user = auth.currentUser;
+  if (!user) throw new Error("로그인이 필요합니다.");
+  return user.getIdToken(forceRefresh);
+}
+
 export {
   browserLocalPersistence,
   collection,
   createUserWithEmailAndPassword,
   deleteDoc,
+  deleteField,
   doc,
   getDoc,
   getDocs,

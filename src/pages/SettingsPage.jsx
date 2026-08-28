@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { AlertTriangle, KeyRound, RotateCcw, Save, Settings, Trash2 } from "lucide-react";
-import { collection, db, deleteDoc, doc, getDocs, setDoc, writeBatch } from "../firebase.js";
+import { collection, db, deleteDoc, doc, getDocs, setDoc } from "../firebase.js";
 import { createManagedTeacher, readLocalTeacherRegistry, useTeacherAuth } from "../hooks/useTeacherAuth.js";
+import { deleteRoomDeep } from "../lib/roomStore.js";
 import { APP_SETTINGS_PATH, DEFAULT_APP_SETTINGS, LOCAL_APP_SETTINGS_KEY, mergeAppSettings, useAppSettings } from "../lib/appSettings.js";
 
 function uniqueUsers(items) {
@@ -186,19 +187,11 @@ export default function SettingsPage() {
     try {
       const snapshot = await getDocs(collection(db, "users", authState.user.uid, "rooms"));
       let deleted = 0;
-      let batch = writeBatch(db);
-      let batchCount = 0;
       for (const roomDoc of snapshot.docs) {
-        batch.delete(roomDoc.ref);
-        batchCount += 1;
+        // Also removes each room's students sub-collection.
+        await deleteRoomDeep(authState.user.uid, roomDoc.id);
         deleted += 1;
-        if (batchCount === 450) {
-          await batch.commit();
-          batch = writeBatch(db);
-          batchCount = 0;
-        }
       }
-      if (batchCount > 0) await batch.commit();
       setRoomCount(0);
       setResetConfirm("");
       setStatus(`게임방 데이터 ${deleted}개를 삭제했습니다.`);

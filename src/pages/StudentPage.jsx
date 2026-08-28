@@ -1,7 +1,7 @@
 ﻿import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { Award, Check, CircleDollarSign, Crown, Lightbulb, Pencil, Send, TrendingUp } from "lucide-react";
-import { auth, onAuthStateChanged, signInAnonymously, updateDoc } from "../firebase.js";
+import { auth, onAuthStateChanged, setDoc, signInAnonymously } from "../firebase.js";
 import {
   C_LEVEL_KEYS,
   C_LEVEL_QUESTIONS,
@@ -16,10 +16,27 @@ import {
   TECH_CARDS,
   TREND_CARDS
 } from "../data/gameData.js";
-import { TEAM_BASE_ASSET, formatWon, getStudentsByTeam, getTeamEntries, normalizeTeamName, rankTeams, recalculateInvestments } from "../lib/game.js";
-import { roomDocRef, useRoom } from "../hooks/useRoom.js";
+import { INVESTMENT_BUDGET, INVESTMENT_STEP, TEAM_BASE_ASSET, formatWon, getStudentsByTeam, getTeamEntries, makeStudent, normalizeTeamName, rankTeams, sumInvestments } from "../lib/game.js";
+import { studentDocRef, useRoom } from "../hooks/useRoom.js";
+import { updateOwnStudent, updateOwnTeam } from "../lib/roomStore.js";
 
-const BUDGET = 50000000;
+const BUDGET = INVESTMENT_BUDGET;
+
+function writeErrorMessage(err, fallback = "저장하지 못했습니다. 네트워크를 확인하고 다시 시도하세요.") {
+  if (err?.code === "permission-denied") return "지금은 이 작업을 할 수 없습니다. 교사가 단계를 이미 넘겼거나 권한이 없습니다.";
+  if (err?.code === "unavailable") return "네트워크 연결이 불안정합니다. 잠시 후 다시 시도하세요.";
+  return err?.message || fallback;
+}
+
+function ErrorBanner({ message, onDismiss }) {
+  if (!message) return null;
+  return (
+    <div role="alert" className="mt-3 flex items-start justify-between gap-3 rounded-lg bg-rose-50 px-4 py-3 text-sm font-bold text-rose-700 ring-1 ring-rose-200">
+      <span>{message}</span>
+      {onDismiss && <button type="button" onClick={onDismiss} className="shrink-0 font-black">닫기</button>}
+    </div>
+  );
+}
 const trendCardImages = Object.entries(import.meta.glob("../images/B*.png", { eager: true, import: "default" }))
   .sort(([a], [b]) => a.localeCompare(b))
   .map(([, image]) => image);
@@ -39,7 +56,8 @@ export default function StudentPage() {
   const { room, loading, error } = useRoom(roomId, ownerUid);
   const [nickname, setNickname] = useState("");
   const [joining, setJoining] = useState(false);
-  const [authUid, setAuthUid] = useState(localStorage.getItem(`startupHero:${roomId}:uid`) || "");
+  const [joinError, setJoinError] = useState("");
+  const [authUid, setAuthUid] = useState("");
   const [authReady, setAuthReady] = useState(false);
 
   useEffect(() => {
@@ -57,18 +75,27 @@ export default function StudentPage() {
   const student = authUid ? room?.students?.[authUid] : null;
 
   async function joinRoom() {
-    if (!nickname.trim()) return;
+    const trimmed = nickname.trim();
+    if (!trimmed) return;
+    if (trimmed.length > 20) {
+      setJoinError("닉네임은 20자 이내로 입력하세요.");
+      return;
+    }
     setJoining(true);
-    const credential = auth.currentUser ? { user: auth.currentUser } : await signInAnonymously(auth);
-    const nextUid = credential.user.uid;
-    setAuthUid(nextUid);
-    localStorage.setItem(`startupHero:${roomId}:uid`, nextUid);
-    localStorage.setItem("startupHero:lastRoomId", roomId);
-    await updateDoc(roomDocRef(ownerUid, roomId), {
-      [`students.${nextUid}`]: { uid: nextUid, nickname: nickname.trim(), team: null, cLevelResult: null, investments: {}, investmentSubmitted: false },
-      sysMessage: `${nickname.trim()} 학생이 입장했습니다.`
-    });
-    setJoining(false);
+    setJoinError("");
+    try {
+      const credential = auth.currentUser ? { user: auth.currentUser } : await signInAnonymously(auth);
+      const nextUid = credential.user.uid;
+      // Each student owns exactly one document; the room document is never touched from here.
+      await setDoc(studentDocRef(ownerUid, roomId, nextUid), makeStudent(nextUid, trimmed), { merge: true });
+      setAuthUid(nextUid);
+      localStorage.setItem(`startupHero:${roomId}:uid`, nextUid);
+      localStorage.setItem("startupHero:lastRoomId", roomId);
+    } catch (err) {
+      setJoinError(writeErrorMessage(err, "입장하지 못했습니다. 네트워크를 확인하고 다시 시도하세요."));
+    } finally {
+      setJoining(false);
+    }
   }
 
   if (loading || !authReady) return <MobileFrame>방 정보를 불러오는 중입니다.</MobileFrame>;
@@ -83,8 +110,9 @@ export default function StudentPage() {
           <p className="text-sm font-bold text-indigo-600">스타트업 히어로</p>
           <h1 className="mt-2 text-3xl font-black">{room.roomTitle}</h1>
           <p className="mt-2 text-slate-500">닉네임을 입력하고 체험에 입장하세요. 같은 브라우저로 다시 들어오면 기존 참여 정보가 유지됩니다.</p>
-          <input value={nickname} onChange={(event) => setNickname(event.target.value)} placeholder="예: 김창업" className="mt-6 rounded-lg border border-slate-200 px-4 py-4 text-lg outline-none focus:border-indigo-500" />
+          <input value={nickname} maxLength={20} onChange={(event) => setNickname(event.target.value)} onKeyDown={(event) => event.key === "Enter" && joinRoom()} placeholder="예: 김창업" className="mt-6 rounded-lg border border-slate-200 px-4 py-4 text-lg outline-none focus:border-indigo-500" />
           <button disabled={joining} onClick={joinRoom} className="touch-button mt-3 rounded-lg bg-indigo-600 px-4 py-4 text-lg font-black text-white disabled:opacity-50">{joining ? "입장 중..." : "입장"}</button>
+          <ErrorBanner message={joinError} onDismiss={() => setJoinError("")} />
         </div>
       </MobileFrame>
     );
@@ -147,19 +175,25 @@ function StudentHeader({ room, uid, student }) {
   const isLeader = myTeam?.leaderId === uid;
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(myTeam?.teamName || "");
+  const savingRef = useRef(false);
 
   useEffect(() => {
     setName(myTeam?.teamName || "");
   }, [myTeam?.teamName]);
 
   async function saveTeamName() {
-    if (!student.team || !isLeader) return;
-    const nextName = normalizeTeamName(name.trim() || myTeam.teamName);
-    await updateDoc(roomDocRef(room.ownerUid, room.roomId), {
-      [`teams.${student.team}.teamName`]: nextName,
-      sysMessage: `${nextName}으로 팀명이 변경되었습니다.`
-    });
+    if (!student.team || !isLeader || savingRef.current) return;
+    const nextName = normalizeTeamName(name.trim() || myTeam.teamName).slice(0, 30);
     setEditing(false);
+    if (nextName === myTeam.teamName) return;
+    savingRef.current = true;
+    try {
+      await updateOwnTeam(room.ownerUid, room.roomId, student.team, { teamName: nextName }, `${nextName}으로 팀명이 변경되었습니다.`);
+    } catch {
+      setName(myTeam.teamName || "");
+    } finally {
+      savingRef.current = false;
+    }
   }
 
   return (
@@ -173,7 +207,7 @@ function StudentHeader({ room, uid, student }) {
         <div className="flex max-w-[58%] items-center gap-1 rounded-full bg-white px-3 py-1 text-sm font-bold text-slate-700">
           {isLeader && <Crown size={14} className="text-amber-500" />}
           {editing ? (
-            <input value={name} onChange={(event) => setName(event.target.value)} onBlur={saveTeamName} onKeyDown={(event) => event.key === "Enter" && saveTeamName()} autoFocus className="min-w-0 bg-transparent outline-none" />
+            <input value={name} maxLength={30} onChange={(event) => setName(event.target.value)} onBlur={saveTeamName} onKeyDown={(event) => event.key === "Enter" && event.currentTarget.blur()} autoFocus className="min-w-0 bg-transparent outline-none" />
           ) : (
             <span className="truncate">{myTeam?.teamName || "팀 미선택"}</span>
           )}
@@ -184,27 +218,34 @@ function StudentHeader({ room, uid, student }) {
   );
 }
 function WaitingRoom({ room, uid }) {
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
   async function selectTeam(teamKey) {
+    if (busy) return;
     const currentTeam = room.students?.[uid]?.team;
     const nextTeam = currentTeam === teamKey ? null : teamKey;
-    const nickname = room.students?.[uid]?.nickname || "학생";
-    await updateDoc(roomDocRef(room.ownerUid, room.roomId), {
-      [`students.${uid}.team`]: nextTeam,
-      sysMessage: nextTeam
-        ? `${nickname} 학생이 ${room.teams?.[teamKey]?.teamName || "팀"}에 합류했습니다.`
-        : `${nickname} 학생이 팀 선택을 취소했습니다.`
-    });
+    setBusy(true);
+    setError("");
+    try {
+      await updateOwnStudent(room.ownerUid, room.roomId, uid, { team: nextTeam });
+    } catch (err) {
+      setError(writeErrorMessage(err));
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
     <section>
       <h2 className="text-2xl font-black">팀을 선택하세요</h2>
+      <ErrorBanner message={error} onDismiss={() => setError("")} />
       <div className="mt-4 grid grid-cols-2 gap-3">
         {getTeamEntries(room.teams).map(([key, team]) => {
           const count = Object.values(room.students || {}).filter((member) => member.team === key).length;
           const selected = room.students?.[uid]?.team === key;
           return (
-            <button key={key} onClick={() => selectTeam(key)} className={`touch-button rounded-lg p-4 text-left shadow-lift ${selected ? "selected-team-card text-white" : "bg-white text-slate-900"}`}>
+            <button key={key} disabled={busy} onClick={() => selectTeam(key)} className={`touch-button rounded-lg p-4 text-left shadow-lift ${selected ? "selected-team-card text-white" : "bg-white text-slate-900"}`}>
               <p className="break-keep text-xl font-black">{team.teamName}</p>
               <p className={`mt-1 text-sm ${selected ? "text-white/85" : "text-slate-500"}`}>{count}명 참여{selected ? " · 선택됨" : ""}</p>
             </button>
@@ -222,6 +263,7 @@ function CLevelDiagnosis({ room, uid, student }) {
   const [answers, setAnswers] = useState(Array(C_LEVEL_QUESTIONS.length).fill(null));
   const [result, setResult] = useState(savedResult || null);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
   const question = C_LEVEL_QUESTIONS[current];
   const selected = answers[current];
   const progress = result ? 100 : Math.round((answers.filter((answer) => answer !== null).length / C_LEVEL_QUESTIONS.length) * 100);
@@ -252,12 +294,15 @@ function CLevelDiagnosis({ room, uid, student }) {
       completedAt: Date.now()
     };
     setSaving(true);
-    await updateDoc(roomDocRef(room.ownerUid, room.roomId), {
-      [`students.${uid}.cLevelResult`]: payload,
-      sysMessage: `${student.nickname} 학생의 C레벨 자가진단 결과는 ${type.key}입니다.`
-    });
-    setResult(payload);
-    setSaving(false);
+    setError("");
+    try {
+      await updateOwnStudent(room.ownerUid, room.roomId, uid, { cLevelResult: payload });
+      setResult(payload);
+    } catch (err) {
+      setError(writeErrorMessage(err, "진단 결과를 저장하지 못했습니다. 다시 시도하세요."));
+    } finally {
+      setSaving(false);
+    }
   }
 
   function chooseOption(index) {
@@ -346,6 +391,7 @@ function CLevelDiagnosis({ room, uid, student }) {
           ))}
         </div>
       </div>
+      <ErrorBanner message={error} onDismiss={() => setError("")} />
       <div className="c-level-nav-buttons">
         <button type="button" disabled={current === 0} onClick={() => setCurrent(current - 1)}>이전</button>
         {current < C_LEVEL_QUESTIONS.length - 1 ? (
@@ -364,6 +410,8 @@ function CardSelect({ room, uid, student }) {
   const [step, setStep] = useState(myTeam?.trendCard && !myTeam?.techCard ? "tech" : "trend");
   const [selectedTrend, setSelectedTrend] = useState(myTeam?.trendCard || null);
   const [selectedTech, setSelectedTech] = useState(myTeam?.techCard || null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     setSelectedTrend(myTeam?.trendCard || null);
@@ -372,25 +420,37 @@ function CardSelect({ room, uid, student }) {
   }, [myTeam?.trendCard, myTeam?.techCard]);
 
   async function confirmTrend() {
-    if (!selectedTrend || !isLeader) return;
-    await updateDoc(roomDocRef(room.ownerUid, room.roomId), {
-      [`teams.${student.team}.trendCard`]: selectedTrend,
-      sysMessage: `${myTeam?.teamName || "팀"}이 ${selectedTrend.title} 트렌드 카드를 선택했습니다.`
-    });
-    setStep("tech");
+    if (!selectedTrend || !isLeader || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await updateOwnTeam(room.ownerUid, room.roomId, student.team, { trendCard: selectedTrend }, `${myTeam?.teamName || "팀"}이 ${selectedTrend.title} 트렌드 카드를 선택했습니다.`);
+      setStep("tech");
+    } catch (err) {
+      setError(writeErrorMessage(err));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function confirmTech() {
-    if (!selectedTrend || !selectedTech || !isLeader) return;
-    const nextTeams = {
-      ...(room.teams || {}),
-      [student.team]: { ...myTeam, trendCard: selectedTrend, techCard: selectedTech }
-    };
-    await updateDoc(roomDocRef(room.ownerUid, room.roomId), {
-      teams: nextTeams,
-      status: room.status,
-      sysMessage: `${myTeam?.teamName || "팀"}이 ${selectedTrend.title} 트렌드와 ${selectedTech.title} 기술카드를 확정했습니다. 교사가 다음 단계로 이동할 때까지 기다려 주세요.`
-    });
+    if (!selectedTrend || !selectedTech || !isLeader || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      // Field-path write on our own team only — never the whole `teams` map or the room `status`.
+      await updateOwnTeam(
+        room.ownerUid,
+        room.roomId,
+        student.team,
+        { trendCard: selectedTrend, techCard: selectedTech },
+        `${myTeam?.teamName || "팀"}이 ${selectedTrend.title} 트렌드와 ${selectedTech.title} 기술카드를 확정했습니다. 교사가 다음 단계로 이동할 때까지 기다려 주세요.`
+      );
+    } catch (err) {
+      setError(writeErrorMessage(err));
+    } finally {
+      setBusy(false);
+    }
   }
 
   if (!student.team) return <Notice>먼저 팀을 선택해야 합니다.</Notice>;
@@ -402,7 +462,8 @@ function CardSelect({ room, uid, student }) {
   return (
     <section>
       <h2 className="text-2xl font-black">트렌드 및 기술카드 선택</h2>
-      <p className="mt-1 text-sm text-slate-500">{isLeader ? "팀장만 선택하고 확정할 수 있습니다." : "팀장이 카드를 선택하는 중입니다."}</p>
+      <p className="mt-1 text-sm text-slate-500">{isLeader ? "팀장만 선택하고 확정할 수 있습니다." : myTeam?.leaderId ? "팀장이 카드를 선택하는 중입니다." : "아직 팀장이 없습니다. 선생님께 팀장 지정을 요청하세요."}</p>
+      <ErrorBanner message={error} onDismiss={() => setError("")} />
       <div className="mt-4 grid grid-cols-2 gap-2 rounded-lg bg-white p-2 text-center text-sm font-black shadow-lift">
         <span className={step === "trend" ? "rounded-lg bg-indigo-600 py-2 text-white" : "py-2 text-slate-500"}>{myTeam?.trendCard && <Check size={14} className="mr-1 inline" />}1. 트렌드</span>
         <span className={step === "tech" ? "rounded-lg bg-indigo-600 py-2 text-white" : "py-2 text-slate-500"}>{myTeam?.techCard && <Check size={14} className="mr-1 inline" />}2. 기술카드</span>
@@ -430,9 +491,9 @@ function CardSelect({ room, uid, student }) {
         ))}
       </div>
       {step === "trend" ? (
-        <button disabled={!isLeader || !selectedTrend} onClick={confirmTrend} className="touch-button sticky bottom-4 mt-4 w-full rounded-lg bg-indigo-600 px-4 py-4 text-lg font-black text-white shadow-lift disabled:bg-slate-200 disabled:text-slate-400">다음(기술카드 선택하기)</button>
+        <button disabled={!isLeader || !selectedTrend || busy} onClick={confirmTrend} className="touch-button sticky bottom-4 mt-4 w-full rounded-lg bg-indigo-600 px-4 py-4 text-lg font-black text-white shadow-lift disabled:bg-slate-200 disabled:text-slate-400">다음(기술카드 선택하기)</button>
       ) : (
-        <button disabled={!isLeader || !selectedTech} onClick={confirmTech} className="touch-button sticky bottom-4 mt-4 w-full rounded-lg bg-indigo-600 px-4 py-4 text-lg font-black text-white shadow-lift disabled:bg-slate-200 disabled:text-slate-400">확인</button>
+        <button disabled={!isLeader || !selectedTech || busy} onClick={confirmTech} className="touch-button sticky bottom-4 mt-4 w-full rounded-lg bg-indigo-600 px-4 py-4 text-lg font-black text-white shadow-lift disabled:bg-slate-200 disabled:text-slate-400">{busy ? "저장 중..." : "확인"}</button>
       )}
     </section>
   );
@@ -505,6 +566,8 @@ function Ideation({ room, uid, student }) {
   };
   const [idea, setIdea] = useState(savedIdea || emptyIdea);
   const [editing, setEditing] = useState(!savedIdea || team?.ideaSubmitted === false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
   const isLeader = team?.leaderId === uid;
   const submitted = Boolean(savedIdea && team?.ideaSubmitted !== false);
   const locked = Boolean(team?.ideaLocked);
@@ -515,33 +578,50 @@ function Ideation({ room, uid, student }) {
   }, [savedIdea, editing, team?.ideaSubmitted]);
 
   async function submitIdea() {
-    if (!isLeader || locked) return;
-    const nextTeams = {
-      ...(room.teams || {}),
-      [student.team]: { ...team, idea, ideaSubmitted: true, aiEvaluation: null }
-    };
-    const activeTeams = Object.keys(nextTeams).filter((teamKey) => Object.values(room.students || {}).some((member) => member.team === teamKey));
-    const allActiveTeamsSubmitted = activeTeams.length > 0 && activeTeams.every((teamKey) => nextTeams[teamKey]?.idea && nextTeams[teamKey]?.ideaSubmitted !== false);
-    await updateDoc(roomDocRef(room.ownerUid, room.roomId), {
-      teams: nextTeams,
-      aiEvaluationStatus: allActiveTeamsSubmitted ? "idle" : room.aiEvaluationStatus || "idle",
-      status: room.status,
-      sysMessage: allActiveTeamsSubmitted
-        ? "모든 팀의 사업계획이 등록되었습니다. 교사가 사업계획 AI 평가 단계로 이동할 때까지 수정할 수 있습니다."
-        : `${team?.teamName || "팀"}이 아이디어를 제출했습니다.`
-    });
-    setEditing(false);
+    if (!isLeader || locked || busy) return;
+    const activeTeams = Object.keys(room.teams || {}).filter((teamKey) => Object.values(room.students || {}).some((member) => member.team === teamKey));
+    const otherTeamsSubmitted = activeTeams
+      .filter((teamKey) => teamKey !== student.team)
+      .every((teamKey) => room.teams[teamKey]?.idea && room.teams[teamKey]?.ideaSubmitted !== false);
+    setBusy(true);
+    setError("");
+    try {
+      // Only our own team's fields are written; the room phase and other teams are never touched.
+      await updateOwnTeam(
+        room.ownerUid,
+        room.roomId,
+        student.team,
+        { idea, ideaSubmitted: true, aiEvaluation: null },
+        otherTeamsSubmitted
+          ? "모든 팀의 사업계획이 등록되었습니다. 교사가 사업계획 AI 평가 단계로 이동할 때까지 수정할 수 있습니다."
+          : `${team?.teamName || "팀"}이 아이디어를 제출했습니다.`
+      );
+      setEditing(false);
+    } catch (err) {
+      setError(writeErrorMessage(err, "사업계획을 제출하지 못했습니다. 다시 시도하세요."));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function unlockIdea() {
-    if (!isLeader || locked) return;
-    await updateDoc(roomDocRef(room.ownerUid, room.roomId), {
-      [`teams.${student.team}.ideaSubmitted`]: false,
-      [`teams.${student.team}.aiEvaluation`]: null,
-      aiEvaluationStatus: "idle",
-      sysMessage: `${team?.teamName || "팀"}이 사업계획 제출을 해제하고 수정 중입니다.`
-    });
-    setEditing(true);
+    if (!isLeader || locked || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await updateOwnTeam(
+        room.ownerUid,
+        room.roomId,
+        student.team,
+        { ideaSubmitted: false, aiEvaluation: null },
+        `${team?.teamName || "팀"}이 사업계획 제출을 해제하고 수정 중입니다.`
+      );
+      setEditing(true);
+    } catch (err) {
+      setError(writeErrorMessage(err));
+    } finally {
+      setBusy(false);
+    }
   }
 
   if (!student.team) return <Notice>먼저 팀을 선택해야 합니다.</Notice>;
@@ -555,8 +635,9 @@ function Ideation({ room, uid, student }) {
           <p className="mt-2 text-sm leading-6 text-emerald-50">관리자 대시보드에 제출 내용이 반영되었습니다. 수정이 필요하면 아래 버튼을 누르세요.</p>
         </div>
         <IdeaSummary team={team} idea={{ ...emptyIdea, ...savedIdea }} />
+        <ErrorBanner message={error} onDismiss={() => setError("")} />
         {isLeader ? (
-          <button disabled={locked} onClick={unlockIdea} className="touch-button mt-4 w-full rounded-lg bg-slate-900 px-4 py-4 text-lg font-black text-white disabled:bg-slate-200 disabled:text-slate-400">{locked ? "관리자 확정 완료" : "제출 해제 및 수정하기"}</button>
+          <button disabled={locked || busy} onClick={unlockIdea} className="touch-button mt-4 w-full rounded-lg bg-slate-900 px-4 py-4 text-lg font-black text-white disabled:bg-slate-200 disabled:text-slate-400">{locked ? "관리자 확정 완료" : "제출 해제 및 수정하기"}</button>
         ) : (
           <Notice>팀장이 제출한 사업계획입니다. 일반 팀원은 보기만 가능합니다.</Notice>
         )}
@@ -595,7 +676,8 @@ function Ideation({ room, uid, student }) {
       <CanvasBlock title="우리 제품 또는 서비스를 한 줄로 참신하게 표현한다면?">
         <input disabled={disabled} value={idea.tagline} onChange={(event) => setIdea({ ...idea, tagline: event.target.value })} className="w-full rounded-lg border border-slate-200 px-3 py-3 outline-none focus:border-indigo-500 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" placeholder="예: 공부 시간을 줄이고 성적은 올리는 AI 학습 파트너" />
       </CanvasBlock>
-      <button disabled={disabled} onClick={submitIdea} className="touch-button mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-4 text-lg font-black text-white disabled:bg-slate-200 disabled:text-slate-400"><Send size={18} /> {locked ? "관리자 확정 완료" : "작성 완료 및 제출"}</button>
+      <ErrorBanner message={error} onDismiss={() => setError("")} />
+      <button disabled={disabled || busy} onClick={submitIdea} className="touch-button mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-4 text-lg font-black text-white disabled:bg-slate-200 disabled:text-slate-400"><Send size={18} /> {locked ? "관리자 확정 완료" : busy ? "제출 중..." : "작성 완료 및 제출"}</button>
     </section>
   );
 }
@@ -616,31 +698,56 @@ function IdeaSummary({ team, idea }) {
   );
 }
 function Investment({ room, uid, student }) {
-  const [investments, setInvestments] = useState(student.investments || {});
+  const availableTeams = getTeamEntries(room.teams).filter(([key]) => key !== student.team);
+  const availableKeys = availableTeams.map(([key]) => key);
+  const [investments, setInvestments] = useState(() => pickInvestments(student.investments, availableKeys));
   const [directInputTeam, setDirectInputTeam] = useState(null);
   const [expandedTeam, setExpandedTeam] = useState(null);
-  const total = Object.values(investments).reduce((sum, value) => sum + Number(value || 0), 0);
-  const availableTeams = getTeamEntries(room.teams).filter(([key]) => key !== student.team);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [limitHint, setLimitHint] = useState("");
+  const total = sumInvestments(investments);
   const submitted = Boolean(student.investmentSubmitted);
 
   useEffect(() => {
-    setInvestments(student.investments || {});
-  }, [student.investments]);
+    setInvestments(pickInvestments(student.investments, availableKeys));
+  }, [student.investments, availableKeys.join("|")]);
 
   async function submit() {
-    const { students, teams } = recalculateInvestments(room, uid, investments);
-    await updateDoc(roomDocRef(room.ownerUid, room.roomId), {
-      students,
-      teams,
-      sysMessage: `${student.nickname} 학생이 투자를 확정했습니다.`
-    });
+    if (busy) return;
+    if (total > BUDGET) {
+      setError(`투자 총액이 예산(${formatWon(BUDGET)})을 초과했습니다.`);
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      // Write only our own record. Team totals are derived on read by every client, so no other
+      // student's investment can be overwritten here.
+      await updateOwnStudent(room.ownerUid, room.roomId, uid, {
+        investments: pickInvestments(investments, availableKeys),
+        investmentSubmitted: true
+      });
+    } catch (err) {
+      setError(writeErrorMessage(err, "투자를 저장하지 못했습니다. 다시 시도하세요."));
+    } finally {
+      setBusy(false);
+    }
   }
 
   function setAmount(teamKey, amount) {
-    const sanitized = Math.max(0, Math.min(BUDGET, Number(amount || 0)));
+    const sanitized = Math.max(0, Math.min(BUDGET, Math.round(Number(amount || 0) / INVESTMENT_STEP) * INVESTMENT_STEP));
     const next = { ...investments, [teamKey]: sanitized };
-    const nextTotal = Object.values(next).reduce((sum, value) => sum + Number(value || 0), 0);
-    if (nextTotal <= BUDGET) setInvestments(next);
+    const nextTotal = sumInvestments(next);
+    if (nextTotal <= BUDGET) {
+      setInvestments(next);
+      setLimitHint("");
+      return;
+    }
+    // Clamp to the remaining budget instead of silently ignoring the change.
+    const remaining = Math.max(0, BUDGET - (total - Number(investments[teamKey] || 0)));
+    setInvestments({ ...investments, [teamKey]: remaining });
+    setLimitHint(`잔여 투자금이 부족해 ${formatWon(remaining)}으로 조정했습니다.`);
   }
 
   return (
@@ -655,6 +762,8 @@ function Investment({ room, uid, student }) {
         <p>상대팀 사업내용을 보고 투자하세요.</p>
       </div>
       {submitted && <div className="ticker-pulse mt-3 rounded-lg bg-rose-50 px-4 py-3 text-sm font-black text-rose-700">투자 완료. 금액을 바꾸고 다시 누르면 재확정됩니다.</div>}
+      {limitHint && <div className="mt-3 rounded-lg bg-amber-50 px-4 py-3 text-sm font-bold text-amber-700 ring-1 ring-amber-200">{limitHint}</div>}
+      <ErrorBanner message={error} onDismiss={() => setError("")} />
       <div className="mt-4 space-y-3">
         {availableTeams.map(([key, team]) => {
           const expanded = expandedTeam === key;
@@ -668,13 +777,13 @@ function Investment({ room, uid, student }) {
               </button>
               {expanded && <InvestmentTeamDetails team={team} />}
               <div className="mt-4 flex items-center gap-3">
-                <input type="range" min="0" max="50000000" step="1000000" value={investments[key] || 0} onChange={(event) => setAmount(key, event.target.value)} className="w-full accent-indigo-600" />
+                <input type="range" min="0" max={BUDGET} step={INVESTMENT_STEP} value={investments[key] || 0} onChange={(event) => setAmount(key, event.target.value)} aria-label={`${team.teamName} 투자 금액`} className="w-full accent-indigo-600" />
                 <span className="w-20 text-right text-sm font-black">{formatWon(investments[key] || 0)}</span>
               </div>
               <button type="button" onClick={() => setDirectInputTeam(directInputTeam === key ? null : key)} className="touch-button mt-3 w-full rounded-lg bg-slate-100 px-3 py-2 text-sm font-black text-slate-700">직접 입력</button>
               {directInputTeam === key && (
                 <div className="mt-3 flex items-center gap-2 rounded-lg bg-slate-50 p-3">
-                  <input type="number" min="0" max="50000000" step="1000000" value={investments[key] || 0} onChange={(event) => setAmount(key, event.target.value)} className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-3 text-right font-black outline-none focus:border-indigo-500" />
+                  <input type="number" inputMode="numeric" min="0" max={BUDGET} step={INVESTMENT_STEP} value={investments[key] || 0} onChange={(event) => setAmount(key, event.target.value)} aria-label={`${team.teamName} 투자 금액 직접 입력`} className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-3 text-right font-black outline-none focus:border-indigo-500" />
                   <span className="text-sm font-bold text-slate-500">원</span>
                 </div>
               )}
@@ -682,9 +791,19 @@ function Investment({ room, uid, student }) {
           );
         })}
       </div>
-      <button onClick={submit} className={`touch-button mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg px-4 py-4 text-lg font-black text-white ${submitted ? "bg-rose-600" : "bg-emerald-600"}`}><CircleDollarSign size={20} /> {submitted ? "투자 재확정" : "투자 확정"}</button>
+      <button disabled={busy} onClick={submit} className={`touch-button mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg px-4 py-4 text-lg font-black text-white disabled:opacity-60 ${submitted ? "bg-rose-600" : "bg-emerald-600"}`}><CircleDollarSign size={20} /> {busy ? "저장 중..." : submitted ? "투자 재확정" : "투자 확정"}</button>
     </section>
   );
+}
+
+/** Keeps only investments into teams the student may invest in (drops own team / deleted teams). */
+function pickInvestments(investments, allowedKeys) {
+  const result = {};
+  for (const key of allowedKeys) {
+    const value = Number(investments?.[key] || 0);
+    if (value > 0) result[key] = value;
+  }
+  return result;
 }
 
 function AiEvaluation({ room, student }) {
@@ -894,10 +1013,12 @@ function StudentEventShowcase({ event, impact, month, team }) {
 function DecisionVote({ room, uid, student, team }) {
   const currentVote = team?.midDecision?.votes?.[uid];
   async function vote(choice) {
-    await updateDoc(roomDocRef(room.ownerUid, room.roomId), {
-      [`teams.${student.team}.midDecision.votes.${uid}`]: choice,
-      sysMessage: `${team?.teamName || "팀"}에서 긴급 의사결정 투표가 진행 중입니다.`
-    });
+    if (currentVote === choice) return;
+    try {
+      await updateOwnTeam(room.ownerUid, room.roomId, student.team, { [`midDecision.votes.${uid}`]: choice });
+    } catch {
+      // The vote UI reflects the room snapshot; a failed write simply leaves the previous vote visible.
+    }
   }
   return (
     <section>

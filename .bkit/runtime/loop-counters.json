@@ -1,0 +1,64 @@
+{
+  "fileEditCounts": {
+    "C:\\Users\\Curioud\\Desktop\\bizquest-main\\src\\lib\\aiEvaluation.js": {
+      "count": 1,
+      "ts": 1787908717139
+    },
+    "C:\\Users\\Curioud\\Desktop\\bizquest-main\\server\\aiEvaluationHandler.js": {
+      "count": 1,
+      "ts": 1787908757233
+    },
+    "C:\\Users\\Curioud\\Desktop\\bizquest-main\\functions\\api\\ai-evaluation.js": {
+      "count": 2,
+      "ts": 1787908865756
+    },
+    "C:\\Users\\Curioud\\Desktop\\bizquest-main\\netlify\\functions\\ai-evaluation.js": {
+      "count": 1,
+      "ts": 1787908767438
+    },
+    "C:\\Users\\Curioud\\Desktop\\bizquest-main\\netlify.toml": {
+      "count": 1,
+      "ts": 1787908768813
+    },
+    "C:\\Users\\Curioud\\Desktop\\bizquest-main\\src\\firebase.js": {
+      "count": 1,
+      "ts": 1787908778585
+    },
+    "C:\\Users\\Curioud\\Desktop\\bizquest-main\\src\\lib\\game.js": {
+      "count": 1,
+      "ts": 1787908804828
+    },
+    "C:\\Users\\Curioud\\Desktop\\bizquest-main\\src\\hooks\\useRoom.js": {
+      "count": 1,
+      "ts": 1787908821325
+    },
+    "C:\\Users\\Curioud\\Desktop\\bizquest-main\\src\\lib\\roomStore.js": {
+      "count": 1,
+      "ts": 1787908841994
+    },
+    "C:\\Users\\Curioud\\Desktop\\bizquest-main\\firestore.rules": {
+      "count": 1,
+      "ts": 1787908892150
+    },
+    "C:\\Users\\Curioud\\Desktop\\bizquest-main\\firebase.json": {
+      "count": 1,
+      "ts": 1787908892954
+    },
+    "C:\\Users\\Curioud\\Desktop\\bizquest-main\\.firebaserc": {
+      "count": 1,
+      "ts": 1787908893498
+    },
+    "C:\\Users\\Curioud\\Desktop\\bizquest-main\\.env.example": {
+      "count": 1,
+      "ts": 1787909172902
+    },
+    "C:\\Users\\Curioud\\Desktop\\bizquest-main\\docs\\security-setup.md": {
+      "count": 1,
+      "ts": 1787909213514
+    },
+    "C:\\Users\\Curioud\\Desktop\\bizquest-main\\server\\aiEvaluationHandler.test.mjs": {
+      "count": 1,
+      "ts": 1787909256343
+    }
+  }
+}

@@ -44,7 +44,7 @@ import {
   Trash2,
   Users
 } from "lucide-react";
-import { collection, db, deleteDoc, getDoc, getDocs, setDoc, updateDoc } from "../firebase.js";
+import { collection, db, getCurrentIdToken, getDoc, getDocs, setDoc, updateDoc } from "../firebase.js";
 import { BUSINESS_FACTORS, STATUSES, STATUS_LABELS } from "../data/gameData.js";
 import {
   TEAM_BASE_ASSET,
@@ -61,6 +61,8 @@ import {
   normalizeTeamName,
   rankTeams
 } from "../lib/game.js";
+import { isFallbackEvaluation, makeFallbackAiEvaluation } from "../lib/aiEvaluation.js";
+import { deleteRoomDeep, deleteTeamDeep, moveStudent, removeStudentDeep, resetRoomDeep } from "../lib/roomStore.js";
 import { useAppSettings } from "../lib/appSettings.js";
 import { roomDocRef, useRoom } from "../hooks/useRoom.js";
 import { loginTeacher, logoutTeacher, registerTeacher, useTeacherAuth } from "../hooks/useTeacherAuth.js";
@@ -88,7 +90,6 @@ const PHASE_ICONS = {
   [STATUSES.SIMULATION]: Cpu,
   [STATUSES.RESULT]: Trophy
 };
-const AI_GRADES = ["양호", "보통", "취약"];
 const SIMULATION_EVENT_DELAY = 5000;
 const SIMULATION_LEASE_TIMEOUT = 12000;
 const AI_EVALUATION_LEASE_TIMEOUT = 15000;
@@ -786,7 +787,8 @@ export default function AdminPage() {
     setDeletingRoomId(savedRoom.roomId);
     setActionError("");
     try {
-      await deleteDoc(roomDocRef(authState.user.uid, savedRoom.roomId));
+      // Removes the room and its students sub-collection (Firestore does not cascade deletes).
+      await deleteRoomDeep(authState.user.uid, savedRoom.roomId);
       setRecentRooms((current) => current.filter((item) => item.roomId !== savedRoom.roomId));
     } catch (err) {
       setActionError(err.message || "저장된 수업을 삭제하지 못했습니다. 잠시 후 다시 시도해 주세요.");
@@ -898,62 +900,77 @@ export default function AdminPage() {
     });
   }
 
+  function reportActionError(err, fallback) {
+    setActionError(err?.message || fallback);
+  }
+
   async function deleteTeam(teamKey) {
-    const nextTeams = { ...teams };
-    const removedName = nextTeams[teamKey]?.teamName || "팀";
-    delete nextTeams[teamKey];
-
-    const nextStudents = Object.fromEntries(
-      Object.entries(students).map(([uid, student]) => [
-        uid,
-        student.team === teamKey ? { ...student, team: null } : student
-      ])
-    );
-
-    await updateRoom({
-      teams: nextTeams,
-      students: nextStudents,
-      sysMessage: `${removedName}이 삭제되어 해당 팀 학생은 대기실로 이동했습니다.`
-    });
+    const removedName = teams[teamKey]?.teamName || "팀";
+    const memberCount = getStudentsByTeam(students, teamKey).length;
+    if (!window.confirm(`“${removedName}” 팀을 삭제할까요?${memberCount ? `\n\n팀원 ${memberCount}명은 대기실로 이동합니다.` : ""}`)) return;
+    try {
+      await deleteTeamDeep({
+        ownerUid: authState.user.uid,
+        roomId,
+        teamKey,
+        students,
+        sysMessage: `${removedName}이 삭제되어 해당 팀 학생은 대기실로 이동했습니다.`
+      });
+    } catch (err) {
+      reportActionError(err, "팀을 삭제하지 못했습니다.");
+    }
   }
 
   async function assignStudentToTeam(uid, teamKey) {
     const nickname = students[uid]?.nickname || "학생";
-    await updateRoom({
-      [`students.${uid}.team`]: teamKey,
-      sysMessage: `${nickname} 학생을 ${teams[teamKey]?.teamName || "팀"}에 배정했습니다.`
-    });
+    try {
+      await moveStudent({
+        ownerUid: authState.user.uid,
+        roomId,
+        uid,
+        student: students[uid],
+        teams,
+        teamKey,
+        sysMessage: `${nickname} 학생을 ${teams[teamKey]?.teamName || "팀"}에 배정했습니다.`
+      });
+    } catch (err) {
+      reportActionError(err, "학생을 배정하지 못했습니다.");
+    }
     setStudentMenu(null);
   }
 
   async function removeStudent(uid) {
     const nickname = students[uid]?.nickname || "학생";
-    const nextStudents = { ...students };
-    delete nextStudents[uid];
-    const nextTeams = Object.fromEntries(Object.entries(teams).map(([key, team]) => [
-      key,
-      team.leaderId === uid ? { ...team, leaderId: null } : team
-    ]));
-    await updateRoom({
-      students: nextStudents,
-      teams: nextTeams,
-      sysMessage: `${nickname} 학생을 대기실에서 내보냈습니다.`
-    });
+    if (!window.confirm(`${nickname} 학생을 방에서 내보낼까요?`)) return;
+    try {
+      await removeStudentDeep({
+        ownerUid: authState.user.uid,
+        roomId,
+        uid,
+        teams,
+        sysMessage: `${nickname} 학생을 대기실에서 내보냈습니다.`
+      });
+    } catch (err) {
+      reportActionError(err, "학생을 내보내지 못했습니다.");
+    }
     setStudentMenu(null);
   }
 
   async function moveStudentToTeam(uid, teamKey) {
     const nickname = students[uid]?.nickname || "학생";
-    const previousTeam = students[uid]?.team;
-    const nextTeams = Object.fromEntries(Object.entries(teams).map(([key, team]) => [
-      key,
-      previousTeam === key && team.leaderId === uid ? { ...team, leaderId: null } : team
-    ]));
-    await updateRoom({
-      [`students.${uid}.team`]: teamKey,
-      teams: nextTeams,
-      sysMessage: `${nickname} 학생을 ${teams[teamKey]?.teamName || "팀"}으로 이동했습니다.`
-    });
+    try {
+      await moveStudent({
+        ownerUid: authState.user.uid,
+        roomId,
+        uid,
+        student: students[uid],
+        teams,
+        teamKey,
+        sysMessage: `${nickname} 학생을 ${teams[teamKey]?.teamName || "팀"}으로 이동했습니다.`
+      });
+    } catch (err) {
+      reportActionError(err, "학생을 이동하지 못했습니다.");
+    }
     setStudentMenu(null);
   }
 
@@ -1008,7 +1025,7 @@ export default function AdminPage() {
 
       for (const [teamKey, team] of pendingEntries) {
         try {
-          evaluations[teamKey] = await requestAiEvaluation(team);
+          evaluations[teamKey] = await requestAiEvaluation(teamKey, team);
         } catch (err) {
           evaluations[teamKey] = makeFallbackAiEvaluation(team, err);
         }
@@ -1043,12 +1060,21 @@ export default function AdminPage() {
   }
 
   async function initializeAssets() {
-    const nextTeams = Object.fromEntries(Object.entries(room.teams || {}).map(([key, team]) => {
-      const base = TEAM_BASE_ASSET + Number(team.investmentsReceived || 0);
-      return [key, { ...team, initialCapital: base, currentAsset: base, midDecision: null, lastEventImpact: null, assetHistory: [{ month: 0, asset: base }] }];
-    }));
+    // Field-path writes only: freezes the derived investment totals onto each team and resets the
+    // simulation fields without touching leader-editable fields (name, cards, idea).
+    const teamPatch = {};
+    for (const [key, team] of Object.entries(room.teams || {})) {
+      const investmentsReceived = Number(team.investmentsReceived || 0);
+      const base = TEAM_BASE_ASSET + investmentsReceived;
+      teamPatch[`teams.${key}.investmentsReceived`] = investmentsReceived;
+      teamPatch[`teams.${key}.initialCapital`] = base;
+      teamPatch[`teams.${key}.currentAsset`] = base;
+      teamPatch[`teams.${key}.midDecision`] = null;
+      teamPatch[`teams.${key}.lastEventImpact`] = null;
+      teamPatch[`teams.${key}.assetHistory`] = [{ month: 0, asset: base }];
+    }
     await updateRoom({
-      teams: nextTeams,
+      ...teamPatch,
       currentMonth: 0,
       currentEvent: null,
       currentEventApplied: true,
@@ -1070,18 +1096,19 @@ export default function AdminPage() {
     if (!applySnap.exists()) return;
     const applyRoom = applySnap.data();
     if (Number(applyRoom.currentMonth || 0) !== month || applyRoom.currentEvent?.id !== event.id || applyRoom.currentEventApplied) return;
-    const nextTeams = Object.fromEntries(
-      Object.entries(applyRoom.teams || {}).map(([key, team]) => {
-        const updated = applyRiskMultiplier(team, event);
-        const history = Array.isArray(team.assetHistory) && team.assetHistory.length > 0
-          ? team.assetHistory
-          : [{ month: 0, asset: Number(team.initialCapital || TEAM_BASE_ASSET) }];
-        return [key, { ...updated, assetHistory: [...history, { month, asset: updated.currentAsset }] }];
-      })
-    );
+    const teamPatch = {};
+    for (const [key, team] of Object.entries(applyRoom.teams || {})) {
+      const updated = applyRiskMultiplier(team, event);
+      const history = Array.isArray(team.assetHistory) && team.assetHistory.length > 0
+        ? team.assetHistory
+        : [{ month: 0, asset: Number(team.initialCapital || TEAM_BASE_ASSET) }];
+      teamPatch[`teams.${key}.currentAsset`] = updated.currentAsset;
+      teamPatch[`teams.${key}.lastEventImpact`] = updated.lastEventImpact;
+      teamPatch[`teams.${key}.assetHistory`] = [...history, { month, asset: updated.currentAsset }];
+    }
     const keepRunning = Boolean(applyRoom.simulationRunning) && month < 24;
     await updateRoom({
-      teams: nextTeams,
+      ...teamPatch,
       currentEventApplied: true,
       simulationRunning: keepRunning,
       simulationOwner: keepRunning ? applyRoom.simulationOwner || adminSessionIdRef.current : null,
@@ -1131,11 +1158,11 @@ export default function AdminPage() {
         ...(Array.isArray(freshRoom.eventHistory) ? freshRoom.eventHistory : []),
         { month, event }
       ];
-      const eventPreviewTeams = Object.fromEntries(
-        Object.entries(freshRoom.teams || {}).map(([key, team]) => [key, { ...team, lastEventImpact: null }])
+      const eventPreviewPatch = Object.fromEntries(
+        Object.keys(freshRoom.teams || {}).map((key) => [`teams.${key}.lastEventImpact`, null])
       );
       await updateRoom({
-        teams: eventPreviewTeams,
+        ...eventPreviewPatch,
         currentMonth: month,
         currentEvent: event,
         currentEventApplied: false,
@@ -1195,24 +1222,19 @@ export default function AdminPage() {
   }
 
   async function continueAfterDecision() {
-    const nextTeams = Object.fromEntries(Object.entries(teams).map(([key, team]) => {
+    const teamPatch = {};
+    for (const [key, team] of Object.entries(teams)) {
       const votes = Object.values(team.midDecision?.votes || {});
       const aCount = votes.filter((vote) => vote === "A").length;
       const bCount = votes.filter((vote) => vote === "B").length;
       const choice = aCount >= bCount ? "A" : "B";
-      return [
-        key,
-        {
-          ...team,
-          currentAsset: choice === "A" ? Number(team.currentAsset || 0) - 20000000 : Number(team.currentAsset || 0),
-          riskShield: choice === "A",
-          riskDouble: choice === "B",
-          midDecision: { ...(team.midDecision || {}), result: choice }
-        }
-      ];
-    }));
+      teamPatch[`teams.${key}.currentAsset`] = choice === "A" ? Number(team.currentAsset || 0) - 20000000 : Number(team.currentAsset || 0);
+      teamPatch[`teams.${key}.riskShield`] = choice === "A";
+      teamPatch[`teams.${key}.riskDouble`] = choice === "B";
+      teamPatch[`teams.${key}.midDecision`] = { ...(team.midDecision || {}), result: choice };
+    }
     await updateRoom({
-      teams: nextTeams,
+      ...teamPatch,
       currentDecision: null,
       sysMessage: "긴급 의사결정 결과를 반영했습니다. 시뮬레이션을 계속합니다."
     });
@@ -1220,75 +1242,46 @@ export default function AdminPage() {
   }
 
   async function resetRoom() {
-    await setDoc(currentRoomRef(), {
-      ...makeInitialRoom(roomId, room?.roomTitle || appSettings.defaultRoomTitle || "스타트업 히어로"),
-      ownerUid: authState.user.uid
-    });
+    const studentCount = Object.keys(students).length;
+    const confirmed = window.confirm(
+      `이 방을 처음 상태로 초기화할까요?\n\n팀 구성, 사업계획, AI 평가, 시뮬레이션 기록과 참가 학생 ${studentCount}명의 정보가 모두 삭제되며 되돌릴 수 없습니다.`
+    );
+    if (!confirmed) return;
+    pauseSimulation();
+    try {
+      await resetRoomDeep(authState.user.uid, roomId, room?.roomTitle || appSettings.defaultRoomTitle || "스타트업 히어로");
+    } catch (err) {
+      reportActionError(err, "방을 초기화하지 못했습니다.");
+    }
   }
 
-  async function requestAiEvaluation(team) {
-    const inputQuality = assessStudentPlanQuality(team);
-    if (!inputQuality.valid) return makeClearlyInvalidAiEvaluation(team, inputQuality.reason);
-
-    const comparisonContext = activeTeamEntries
-      .filter(([, comparisonTeam]) => comparisonTeam !== team)
-      .map(([, comparisonTeam]) => summarizePlanForComparison(comparisonTeam))
-      .join("\n") || "비교할 다른 팀이 없습니다.";
-    const prompt = [
-      "너는 청소년 창업 수업의 성장 중심 평가 위원이야.",
-      "평가 대상은 전문 창업가가 아니라 아이디어를 처음 구체화하는 학생이다. 투자심사 수준의 완성도를 요구하지 말고, 학생이 표현한 가능성과 논리적 연결을 먼저 인정해.",
-      "아래 사업계획을 14가지 팩터(F01~F14)에 대해 각각 '양호', '보통', '취약' 중 하나로 판정해.",
-      "판정 기준: '양호'는 아이디어와 팩터의 연결이 구체적이거나 강점이 보이는 경우, '보통'은 의미 있는 아이디어가 있으나 설명이 짧거나 보완 여지가 있는 경우, '취약'은 해당 팩터가 명백히 빠졌거나 서로 모순되거나 실제 위험이 뚜렷한 경우다.",
-      "의미 있는 문장과 사업 아이디어가 확인되면 '보통'을 기본값으로 삼아라. 단지 설명이 짧거나 전문 용어가 없다는 이유만으로 '취약'을 주지 마라.",
-      "모든 팩터를 같은 등급으로 기계적으로 채우지 말고, 각 팀의 고객·문제·해결책·수익·홍보 내용에 근거해 강점과 보완점을 분별력 있게 나눠라. 다른 팀과 등급 개수를 억지로 맞추지는 마라.",
-      "현재 팀만의 구체적인 표현을 reason에 반영하고, 다른 팀의 이름이나 내용을 reason에 노출하지 마라.",
-      "이미 사전 검사를 통과한 유효한 학생 사업계획이므로 전체를 '취약'으로 판정해서는 안 된다.",
-      "반드시 JSON만 출력해. 형식은 {\"factors\":{\"F01\":{\"grade\":\"양호\",\"reason\":\"한 줄 이유\"}},\"opinion\":\"강점과 다음 보완점이 담긴 격려형 1~2줄 총평\"}.",
-      `팩터: ${BUSINESS_FACTORS.map((factor) => `${factor.id} ${factor.name}: ${factor.description}`).join(" / ")}`,
-      `수업 내 다른 팀 요약(상대적인 구체성 판단에만 사용):\n${comparisonContext}`,
-      "평가할 현재 팀:",
-      `팀명: ${team.teamName}`,
-      `트렌드: ${team.trendCard?.title || "미선택"}`,
-      `기술카드: ${team.techCard?.title || "미선택"}`,
-      `제품 및 서비스명: ${team.idea?.serviceName || "-"}`,
-      `문제정의: ${team.idea?.problem || "-"}`,
-      `고객정의: ${(team.idea?.customers || []).join(", ") || "-"}`,
-      `해결 아이디어: ${team.idea?.solution || "-"}`,
-      `제품/서비스 설명: ${team.idea?.product || "-"}`,
-      `수익모델: ${(team.idea?.revenueModels || []).join(", ") || "-"}`,
-      `마케팅 전략: ${(team.idea?.marketingStrategies || []).join(", ") || "-"}`,
-      `한 줄 표현: ${team.idea?.tagline || "-"}`
-    ].join("\n");
-
-    const response = await requestLetsurViaProxy(prompt);
-    return parseLetsurResponse(response, team);
-  }
-
-  async function requestLetsurViaProxy(prompt) {
-    return fetch("/api/ai-evaluation", {
+  /**
+   * Asks the server to evaluate one team. The server verifies the teacher's Firebase ID token,
+   * reads the team's plan straight from Firestore and builds the prompt itself, so no prompt text
+   * ever travels from the browser.
+   */
+  async function requestAiEvaluation(teamKey, team) {
+    const idToken = await getCurrentIdToken();
+    const response = await fetch("/api/ai-evaluation", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt })
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${idToken}`
+      },
+      body: JSON.stringify({ ownerUid: authState.user.uid, roomId, teamKey })
     });
-  }
-
-  async function parseLetsurResponse(response, team) {
     if (!response.ok) {
       const errorText = await response.text().catch(() => "");
-      const deployedHost = window.location.host;
       const hint = response.status === 401 || response.status === 403
-        ? ` 배포 도메인(${deployedHost})의 /api/ai-evaluation 함수에서 LETSUR_API_KEY가 거부되었습니다. 서버 환경변수를 확인하세요.`
-        : "";
+        ? " 교사 로그인 상태가 만료되었거나 방 소유자가 아닙니다. 다시 로그인한 뒤 시도하세요."
+        : response.status === 502 && /LETSUR_API_KEY/.test(errorText)
+          ? ` 배포 도메인(${window.location.host})의 서버 환경변수 LETSUR_API_KEY를 확인하세요.`
+          : "";
       throw new Error(`AI 응답 오류 ${response.status}.${hint}${errorText ? ` ${errorText.slice(0, 220)}` : ""}`);
     }
     const payload = await response.json();
-    const content = payload.choices?.[0]?.message?.content;
-    const text = typeof content === "string"
-      ? content
-      : Array.isArray(content)
-        ? content.map((part) => part?.text || part?.content || "").join("")
-        : "{}";
-    return normalizeAiEvaluation(JSON.parse(stripJsonFence(text)), team);
+    if (!payload?.evaluation?.factors) throw new Error("AI 서버가 올바르지 않은 응답을 반환했습니다.");
+    return { ...payload.evaluation, teamName: team?.teamName };
   }
 
   if (!roomId) {
@@ -1760,7 +1753,7 @@ function AiEvaluationSummary({ team, onOpenOpinion }) {
   if (!evaluation) {
     return <div className="mt-3 rounded-lg bg-slate-100 px-3 py-3 text-xs font-bold text-slate-500">AI 평가 대기</div>;
   }
-  const isFallback = String(evaluation.model || "").includes("fallback");
+  const isFallback = isFallbackEvaluation(evaluation);
   return (
     <div className="mt-3 rounded-lg bg-white/80 p-3 ring-1 ring-slate-200">
       <div className="mb-2 flex items-center justify-between gap-2">
@@ -1775,7 +1768,7 @@ function AiEvaluationSummary({ team, onOpenOpinion }) {
           <p className="mb-2 rounded-lg bg-indigo-50 p-3 text-xs font-bold leading-5 text-indigo-800">{evaluation.opinion || "평가 의견이 없습니다."}</p>
           {isFallback && (
             <div className="mb-2 rounded-lg bg-amber-50 px-3 py-2 text-xs font-black text-amber-700 ring-1 ring-amber-200">
-              Gemini 응답 실패 - 기본 평가 기준 적용
+              AI 응답 실패 - 기본 평가 기준 적용
             </div>
           )}
           <div className="ai-factor-grid">
@@ -1858,7 +1851,7 @@ function BusinessPlanModal({ team, onClose }) {
 
 function AiOpinionModal({ team, onClose }) {
   const evaluation = team.aiEvaluation;
-  const isFallback = String(evaluation?.model || "").includes("fallback");
+  const isFallback = isFallbackEvaluation(evaluation);
   return createPortal((
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/70 p-5" onClick={onClose}>
       <article className="max-h-[86vh] w-full max-w-2xl overflow-y-auto rounded-lg bg-white p-6 shadow-lift" onClick={(event) => event.stopPropagation()}>
@@ -1866,7 +1859,7 @@ function AiOpinionModal({ team, onClose }) {
         <h2 className="mt-1 text-3xl font-black">{team.teamName}</h2>
         {isFallback && (
           <div className="mt-3 rounded-lg bg-amber-50 px-4 py-3 text-sm font-black text-amber-700 ring-1 ring-amber-200">
-            Gemini 호출 실패로 기본 평가를 표시합니다. {evaluation?.errorMessage || evaluation?.model || ""}
+            AI 호출 실패로 기본 평가를 표시합니다. {evaluation?.errorMessage || evaluation?.model || ""}
           </div>
         )}
         <p className="mt-3 rounded-lg bg-indigo-50 p-4 text-sm font-bold leading-6 text-indigo-800">{evaluation?.opinion || "아직 평가 의견이 없습니다."}</p>
@@ -2036,149 +2029,14 @@ function QrModal({ value, roomId, onClose }) {
   ), document.body);
 }
 
-function stripJsonFence(text) {
-  return String(text || "").replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```$/i, "").trim();
-}
-
-function getStudentPlanCoreParts(team) {
-  return [
-    team.idea?.serviceName,
-    team.idea?.problem,
-    team.idea?.solution,
-    team.idea?.product,
-    team.idea?.tagline
-  ].map((value) => String(value || "").trim()).filter(Boolean);
-}
-
-function assessStudentPlanQuality(team) {
-  const parts = getStudentPlanCoreParts(team);
-  const text = parts.join(" ");
-  const compact = text.replace(/[^\p{L}\p{N}]/gu, "");
-  const tokens = (text.toLowerCase().match(/[\p{L}\p{N}]+/gu) || []).filter((token) => token.length >= 2);
-  const counts = tokens.reduce((result, token) => ({ ...result, [token]: (result[token] || 0) + 1 }), {});
-  const dominantTokenCount = Math.max(0, ...Object.values(counts));
-  const dominantTokenRatio = tokens.length ? dominantTokenCount / tokens.length : 0;
-  const uniqueCharacters = new Set(compact).size;
-  const repeatedCharacters = /(.)\1{7,}/u.test(compact);
-  const lowVarietyRepetition = compact.length >= 18 && uniqueCharacters <= 4;
-  const repeatedWords = tokens.length >= 5 && dominantTokenRatio >= 0.6;
-
-  if (compact.length < 30) {
-    return { valid: false, reason: "사업 아이디어를 판단할 수 있는 문장이 한 줄 분량에 미치지 못했습니다.", length: compact.length };
-  }
-  if (repeatedCharacters || lowVarietyRepetition || repeatedWords) {
-    return { valid: false, reason: "같은 문자나 단어의 반복이 대부분이라 사업 아이디어의 의미를 판단하기 어렵습니다.", length: compact.length };
-  }
-  return { valid: true, reason: "", length: compact.length };
-}
-
-function summarizePlanForComparison(team) {
-  const idea = team.idea || {};
-  return [
-    `${team.teamName || "이름 없는 팀"}`,
-    idea.serviceName || "서비스명 미작성",
-    idea.problem || "문제 미작성",
-    idea.solution || "해결책 미작성",
-    (idea.customers || []).join(", ") || "고객 미작성"
-  ].join(" | ").slice(0, 420);
-}
-
 function makeAiEvaluationMessage(evaluations = {}) {
   const values = Object.values(evaluations);
-  const fallbackCount = values.filter((evaluation) => String(evaluation?.model || "").includes("fallback")).length;
+  const fallbackCount = values.filter((evaluation) => isFallbackEvaluation(evaluation)).length;
   const aiSuccessCount = Math.max(0, values.length - fallbackCount);
   if (fallbackCount > 0) {
     return `AI 평가 완료: 렛서 AI 성공 ${aiSuccessCount}팀, 기본 평가 적용 ${fallbackCount}팀. 평가의견에서 실패 사유를 확인하세요.`;
   }
   return `AI 사업계획서 평가가 완료되었습니다. 팀 패널에서 14개 지표와 1~2줄 종합의견을 확인하세요.`;
-}
-
-function normalizeAiEvaluation(raw, team) {
-  const quality = assessStudentPlanQuality(team || {});
-  const factors = {};
-  for (const factor of BUSINESS_FACTORS) {
-    const item = raw?.factors?.[factor.id] || {};
-    const grade = AI_GRADES.includes(item.grade) ? item.grade : "보통";
-    factors[factor.id] = {
-      grade,
-      reason: String(item.reason || factor.description).slice(0, 80)
-    };
-  }
-
-  if (quality.valid) {
-    const weakFactors = BUSINESS_FACTORS.filter((factor) => factors[factor.id].grade === "취약");
-    const maximumWeakFactors = quality.length >= 120 ? 3 : 5;
-    weakFactors.slice(maximumWeakFactors).forEach((factor) => {
-      factors[factor.id] = {
-        grade: "보통",
-        reason: `${factor.name}은 학생 아이디어의 발전 가능성을 반영해 보통으로 판정했습니다.`
-      };
-    });
-  }
-
-  return {
-    factors,
-    opinion: String(raw?.opinion || "사업계획의 강점과 보완점을 바탕으로 경영 시뮬레이션을 진행합니다.").slice(0, 160),
-    evaluatedAt: Date.now(),
-    model: "gemini-2.5-pro-via-letsur"
-  };
-}
-
-function makeClearlyInvalidAiEvaluation(team, reason) {
-  const factors = Object.fromEntries(BUSINESS_FACTORS.map((factor) => [
-    factor.id,
-    {
-      grade: "취약",
-      reason: "사업계획 내용이 부족하거나 반복되어 의미를 판단하기 어려워 취약으로 판정했습니다."
-    }
-  ]));
-  return {
-    factors,
-    opinion: `${team.teamName || "이 팀"}의 입력은 ${reason} 문제·고객·해결 방법을 문장으로 보완하면 다시 평가받을 수 있습니다.`.slice(0, 160),
-    evaluatedAt: Date.now(),
-    model: "student-plan-quality-check"
-  };
-}
-
-function makeFallbackAiEvaluation(team, error) {
-  const ideaText = [
-    team.trendCard?.title,
-    team.techCard?.title,
-    team.idea?.serviceName,
-    team.idea?.problem,
-    ...(team.idea?.customers || []),
-    team.idea?.solution,
-    team.idea?.product,
-    ...(team.idea?.revenueModels || []),
-    ...(team.idea?.marketingStrategies || []),
-    team.idea?.tagline
-  ].join(" ");
-
-  const hasAny = (...words) => words.some((word) => ideaText.includes(word));
-  const factors = {};
-  for (const factor of BUSINESS_FACTORS) {
-    let grade = "보통";
-    if (factor.id === "F03" && hasAny("앱", "AI", "온라인", "플랫폼", "서비스")) grade = "양호";
-    if (factor.id === "F05" && hasAny("온라인", "앱", "AI", "스마트폰", "플랫폼", "배송")) grade = "양호";
-    if (factor.id === "F06" && hasAny("AI", "앱", "디지털", "스마트폰", "플랫폼", "자동")) grade = "양호";
-    if (factor.id === "F07" && (team.idea?.customers || []).length > 0) grade = "양호";
-    if (factor.id === "F11" && hasAny("인스타", "틱톡", "유튜브", "입소문", "인플루언서", "콘텐츠")) grade = "양호";
-    if (factor.id === "F12" && hasAny("구독", "정기", "관리", "커뮤니티", "프리미엄")) grade = "양호";
-    if (factor.id === "F04" && hasAny("제품 판매", "포장", "배달", "푸드", "제조")) grade = "취약";
-    if (factor.id === "F08" && hasAny("사람", "오프라인", "매장", "교육", "돌봄")) grade = "취약";
-    if (factor.id === "F10" && hasAny("여행", "오프라인", "배달", "매장", "야외")) grade = "취약";
-    factors[factor.id] = {
-      grade,
-      reason: `${factor.name} 관점에서 사업계획의 핵심 키워드를 기준으로 ${grade}로 판정했습니다.`
-    };
-  }
-  return {
-    factors,
-    opinion: `렛서 AI 응답 문제로 기본 평가 기준을 적용했습니다. ${team.idea?.serviceName || team.idea?.product || "이 아이디어"}는 강점 지표를 살리고 취약 지표를 보완해야 합니다.`,
-    evaluatedAt: Date.now(),
-    model: "gemini-2.5-pro-via-letsur-fallback",
-    errorMessage: String(error?.message || "unknown").slice(0, 240)
-  };
 }
 
 function gradeClassName(grade) {
