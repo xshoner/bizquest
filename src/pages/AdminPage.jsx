@@ -53,7 +53,9 @@ import {
   formatWon,
   getAvatarColor,
   getStudentsByTeam,
+  getTeamBaseAsset,
   getTeamEntries,
+  getTeamStartingCapital,
   makeInitialRoom,
   makeNextTeamKey,
   makeRoomId,
@@ -655,6 +657,7 @@ export default function AdminPage() {
     Object.values(students).some((student) => student.team === teamKey)
   ), [teams, students]);
   const allPlansSubmitted = activeTeamEntries.length > 0 && activeTeamEntries.every(([, team]) => team.idea && team.ideaSubmitted !== false);
+  const allPlansLocked = allPlansSubmitted && activeTeamEntries.every(([, team]) => team.ideaLocked);
   const allTeamsEvaluated = activeTeamEntries.length > 0 && activeTeamEntries.every(([, team]) => team.aiEvaluation);
   const investmentChartVisible = [STATUSES.INVESTMENT, STATUSES.SIMULATION, STATUSES.RESULT].includes(room?.status);
   const currentRoomRef = () => roomDocRef(authState.user.uid, roomId);
@@ -837,6 +840,13 @@ export default function AdminPage() {
         await evaluateBusinessPlans();
         return;
       }
+      if (!allPlansLocked) {
+        const pending = activeTeamEntries.filter(([, team]) => !team.ideaLocked).map(([, team]) => team.teamName).join(", ");
+        await updateRoom({
+          sysMessage: `모든 팀의 사업계획서를 '확정'해야 AI 평가 단계로 이동할 수 있습니다. 미확정: ${pending}`
+        });
+        return;
+      }
       setAiConfirmOpen(true);
       return;
     }
@@ -989,6 +999,12 @@ export default function AdminPage() {
       });
       return;
     }
+    if (!allPlansLocked) {
+      await updateRoom({
+        sysMessage: "모든 팀의 사업계획서를 교사가 '확정'해야 AI 평가를 시작할 수 있습니다."
+      });
+      return;
+    }
 
     const evaluations = Object.fromEntries(
       activeTeamEntries
@@ -1065,8 +1081,11 @@ export default function AdminPage() {
     const teamPatch = {};
     for (const [key, team] of Object.entries(room.teams || {})) {
       const investmentsReceived = Number(team.investmentsReceived || 0);
-      const base = TEAM_BASE_ASSET + investmentsReceived;
+      const baseAsset = getTeamBaseAsset(team); // includes the C-level diversity bonus
+      const base = baseAsset + investmentsReceived;
       teamPatch[`teams.${key}.investmentsReceived`] = investmentsReceived;
+      teamPatch[`teams.${key}.baseAsset`] = baseAsset;
+      teamPatch[`teams.${key}.diversity`] = team.diversity ? { key: team.diversity.key, label: team.diversity.label, rate: team.diversity.rate } : null;
       teamPatch[`teams.${key}.initialCapital`] = base;
       teamPatch[`teams.${key}.currentAsset`] = base;
       teamPatch[`teams.${key}.midDecision`] = null;
@@ -1087,7 +1106,7 @@ export default function AdminPage() {
       simulationOwner: adminSessionIdRef.current,
       simulationHeartbeatAt: Date.now(),
       status: STATUSES.SIMULATION,
-      sysMessage: "AI 경영 시뮬레이션을 시작합니다. 모든 팀은 기본 자산 100,000,000원에 투자 유치금을 더해 출발합니다."
+      sysMessage: "AI 경영 시뮬레이션을 시작합니다. 모든 팀은 기본 자산(C레벨 다양성 보너스 반영)에 투자 유치금을 더해 출발합니다."
     });
   }
 
@@ -1101,7 +1120,7 @@ export default function AdminPage() {
       const updated = applyRiskMultiplier(team, event);
       const history = Array.isArray(team.assetHistory) && team.assetHistory.length > 0
         ? team.assetHistory
-        : [{ month: 0, asset: Number(team.initialCapital || TEAM_BASE_ASSET) }];
+        : [{ month: 0, asset: getTeamStartingCapital(team) }];
       teamPatch[`teams.${key}.currentAsset`] = updated.currentAsset;
       teamPatch[`teams.${key}.lastEventImpact`] = updated.lastEventImpact;
       teamPatch[`teams.${key}.assetHistory`] = [...history, { month, asset: updated.currentAsset }];
@@ -1457,12 +1476,23 @@ function TeamGrid({ roomStatus, teams, students, onOpenStudentMenu, onRenameTeam
             if (b.uid === team.leaderId) return 1;
             return String(a.nickname || "").localeCompare(String(b.nickname || ""), "ko");
           });
+          const diversity = team.diversity;
           return (
             <section key={key} className="rounded-lg bg-white p-4 shadow-lift">
               <div className="flex items-center gap-2">
                 <input key={`${key}-${team.teamName}`} defaultValue={team.teamName} onBlur={(event) => onRenameTeam(key, event.target.value)} className="min-w-0 flex-1 rounded-lg border border-transparent bg-slate-50 px-3 py-2 text-lg font-black focus:border-indigo-500 focus:outline-none" />
+                <span className="team-member-count" title="현재 팀 인원"><Users size={14} /> 총 {members.length}명</span>
                 <button title="팀 삭제" onClick={() => onDeleteTeam(key)} className="print:hidden touch-button grid w-12 place-items-center rounded-lg bg-rose-50 text-rose-600"><Trash2 size={18} /></button>
               </div>
+              {diversity && (
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <span className={`diversity-badge diversity-badge-${diversity.key}`}>
+                    <Sparkles size={13} /> {diversity.label}
+                    <b>{diversity.rate > 0 ? "+" : ""}{diversity.rate}%</b>
+                  </span>
+                  <span className="text-xs font-bold text-slate-500">C레벨 자가진단 구성 보너스 → 기본 자산 {formatWon(getTeamBaseAsset(team))}</span>
+                </div>
+              )}
               <div className="mt-3 flex flex-wrap gap-2">
                 {members.map((student) => (
                   <button key={student.uid} onClick={() => onOpenStudentMenu(student.uid, key)} className={`team-member-chip ${team.leaderId === student.uid ? "team-member-chip-leader" : ""}`}>
@@ -1495,7 +1525,7 @@ function TeamGrid({ roomStatus, teams, students, onOpenStudentMenu, onRenameTeam
                   <button type="button" disabled={!team.idea || team.ideaSubmitted === false} onClick={() => onOpenPlan({ key, ...team })} className="touch-button rounded-lg bg-indigo-600 px-3 py-2 text-sm font-black text-white disabled:bg-slate-200 disabled:text-slate-400">{team.idea && team.ideaSubmitted !== false ? "사업계획 등록 완료!" : "사업계획서 미등록"}</button>
                   <button type="button" disabled={!team.idea || team.ideaSubmitted === false || team.ideaLocked} onClick={() => onLockPlan(key)} className="touch-button rounded-lg bg-slate-900 px-3 py-2 text-sm font-black text-white disabled:bg-slate-200 disabled:text-slate-400">{team.ideaLocked ? "확정됨" : "확정"}</button>
                 </div>
-                <InvestmentGauge investment={team.investmentsReceived || 0} maxInvestment={maxInvestment} />
+                <InvestmentGauge team={team} maxInvestment={maxInvestment} />
                 <AiEvaluationSummary team={team} onOpenOpinion={() => onOpenOpinion({ key, ...team })} />
               </div>
             </section>
@@ -1757,7 +1787,7 @@ function AiEvaluationSummary({ team, onOpenOpinion }) {
   return (
     <div className="mt-3 rounded-lg bg-white/80 p-3 ring-1 ring-slate-200">
       <div className="mb-2 flex items-center justify-between gap-2">
-        <p className="text-xs font-black text-slate-600">AI 평가 결과</p>
+        <p className="min-w-0 truncate text-xs font-black text-slate-600">AI 평가 결과{team.idea?.serviceName && <span className="ml-1 font-bold text-indigo-700">· {team.idea.serviceName}</span>}</p>
         <div className="print:hidden flex gap-1">
           <button type="button" onClick={() => setExpanded(!expanded)} className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-black text-indigo-700">{expanded ? "접기" : "펼치기"}</button>
           <button type="button" onClick={onOpenOpinion} className="rounded-full bg-slate-900 px-3 py-1 text-xs font-black text-white">상세보기</button>
@@ -1788,16 +1818,29 @@ function AiEvaluationSummary({ team, onOpenOpinion }) {
   );
 }
 
-function InvestmentGauge({ investment, maxInvestment }) {
-  const width = Math.max(4, (Number(investment || 0) / Math.max(1, Number(maxInvestment || 1))) * 100);
+// The default base asset (1억) fills 30% of the gauge; the diversity bonus and investments extend it.
+const GAUGE_BASE_FILL_RATIO = 0.3;
+
+function InvestmentGauge({ team }) {
+  const investment = Number(team?.investmentsReceived || 0);
+  const baseAsset = getTeamBaseAsset(team);
+  const bonusRate = Number(team?.diversity?.rate || 0);
+  const fullScale = TEAM_BASE_ASSET / GAUGE_BASE_FILL_RATIO;
+  const baseWidth = Math.min(100, (baseAsset / fullScale) * 100);
+  const investmentWidth = Math.min(100 - baseWidth, (investment / fullScale) * 100);
+  const hasBonus = bonusRate !== 0;
   return (
     <div className="mt-3 rounded-lg bg-white/80 p-3 ring-1 ring-slate-200">
       <div className="investment-gauge-summary">
-        <p><span>기본자산</span><strong>{formatWon(TEAM_BASE_ASSET)}</strong></p>
+        <p>
+          <span>기본자산{hasBonus && <em className={`gauge-bonus-tag ${bonusRate > 0 ? "gauge-bonus-plus" : "gauge-bonus-minus"}`}>{bonusRate > 0 ? "+" : ""}{bonusRate}%</em>}</span>
+          <strong className={hasBonus ? "text-rose-600" : ""}>{formatWon(baseAsset)}</strong>
+        </p>
         <p><span>투자유치</span><strong className="text-indigo-700">{formatWon(investment)}</strong></p>
       </div>
-      <div className="h-4 overflow-hidden rounded-full bg-slate-200">
-        <div className="h-full rounded-full bg-gradient-to-r from-indigo-600 via-cyan-400 to-emerald-400 transition-all" style={{ width: `${width}%` }} />
+      <div className="asset-gauge" role="img" aria-label={`기본자산 ${formatWon(baseAsset)}, 투자유치 ${formatWon(investment)}`}>
+        <div className={`asset-gauge-base ${hasBonus ? (bonusRate > 0 ? "asset-gauge-base-plus" : "asset-gauge-base-minus") : ""}`} style={{ width: `${baseWidth}%` }} />
+        <div className="asset-gauge-investment" style={{ left: `${baseWidth}%`, width: `${investmentWidth}%` }} />
       </div>
     </div>
   );
@@ -1857,6 +1900,7 @@ function AiOpinionModal({ team, onClose }) {
       <article className="max-h-[86vh] w-full max-w-2xl overflow-y-auto rounded-lg bg-white p-6 shadow-lift" onClick={(event) => event.stopPropagation()}>
         <p className="text-sm font-bold text-indigo-600">AI 평가의견</p>
         <h2 className="mt-1 text-3xl font-black">{team.teamName}</h2>
+        {team.idea?.serviceName && <p className="mt-1 text-sm font-bold text-slate-600"><span className="text-slate-400">제품 및 서비스명</span> · {team.idea.serviceName}</p>}
         {isFallback && (
           <div className="mt-3 rounded-lg bg-amber-50 px-4 py-3 text-sm font-black text-amber-700 ring-1 ring-amber-200">
             AI 호출 실패로 기본 평가를 표시합니다. {evaluation?.errorMessage || evaluation?.model || ""}
@@ -1932,7 +1976,7 @@ function ResultBoard({ rankedTeams, teams, students, room }) {
 }
 
 function AssetChangeSummary({ team, featured = false, className = "" }) {
-  const initial = Number(team.initialCapital || TEAM_BASE_ASSET + Number(team.investmentsReceived || 0));
+  const initial = getTeamStartingCapital(team);
   const final = Number(team.currentAsset || 0);
   const rate = initial ? ((final - initial) / initial) * 100 : 0;
   const positive = rate >= 0;
@@ -2002,8 +2046,8 @@ function normalizeAssetHistory(team) {
   const history = Array.isArray(team.assetHistory) && team.assetHistory.length > 1
     ? team.assetHistory
     : [
-        { month: 0, asset: Number(team.initialCapital || TEAM_BASE_ASSET) },
-        { month: 24, asset: Number(team.currentAsset || team.initialCapital || TEAM_BASE_ASSET) }
+        { month: 0, asset: getTeamStartingCapital(team) },
+        { month: 24, asset: Number(team.currentAsset || getTeamStartingCapital(team)) }
       ];
   const sampled = history.filter((point, index) => {
     const month = Number(point.month || 0);

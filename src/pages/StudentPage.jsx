@@ -1,6 +1,6 @@
 ﻿import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { Award, Check, CircleDollarSign, Crown, Lightbulb, Pencil, Send, TrendingUp } from "lucide-react";
+import { Award, Check, CircleDollarSign, Crown, Lightbulb, Pencil, RotateCcw, Send, TrendingUp } from "lucide-react";
 import { auth, onAuthStateChanged, setDoc, signInAnonymously } from "../firebase.js";
 import {
   C_LEVEL_KEYS,
@@ -16,24 +16,38 @@ import {
   TECH_CARDS,
   TREND_CARDS
 } from "../data/gameData.js";
-import { INVESTMENT_BUDGET, INVESTMENT_STEP, TEAM_BASE_ASSET, formatWon, getStudentsByTeam, getTeamEntries, makeStudent, normalizeTeamName, rankTeams, sumInvestments } from "../lib/game.js";
+import { INVESTMENT_BUDGET, INVESTMENT_STEP, TEAM_BASE_ASSET, formatWon, getStudentsByTeam, getTeamBaseAsset, getTeamEntries, getTeamStartingCapital, makeStudent, normalizeTeamName, rankTeams, sumInvestments } from "../lib/game.js";
 import { studentDocRef, useRoom } from "../hooks/useRoom.js";
 import { updateOwnStudent, updateOwnTeam } from "../lib/roomStore.js";
 
 const BUDGET = INVESTMENT_BUDGET;
 
+const STALE_SCREEN_MESSAGE = "화면 정보가 오래되어 저장하지 못했습니다. 새로고침 버튼을 누르거나 다시 QR코드를 촬영하세요.";
+
 function writeErrorMessage(err, fallback = "저장하지 못했습니다. 네트워크를 확인하고 다시 시도하세요.") {
-  if (err?.code === "permission-denied") return "지금은 이 작업을 할 수 없습니다. 교사가 단계를 이미 넘겼거나 권한이 없습니다.";
+  if (err?.code === "permission-denied") return STALE_SCREEN_MESSAGE;
   if (err?.code === "unavailable") return "네트워크 연결이 불안정합니다. 잠시 후 다시 시도하세요.";
   return err?.message || fallback;
 }
 
+function reloadPage() {
+  window.location.reload();
+}
+
 function ErrorBanner({ message, onDismiss }) {
   if (!message) return null;
+  const showReload = message === STALE_SCREEN_MESSAGE;
   return (
-    <div role="alert" className="mt-3 flex items-start justify-between gap-3 rounded-lg bg-rose-50 px-4 py-3 text-sm font-bold text-rose-700 ring-1 ring-rose-200">
-      <span>{message}</span>
-      {onDismiss && <button type="button" onClick={onDismiss} className="shrink-0 font-black">닫기</button>}
+    <div role="alert" className="mt-3 rounded-lg bg-rose-50 px-4 py-3 text-sm font-bold text-rose-700 ring-1 ring-rose-200">
+      <div className="flex items-start justify-between gap-3">
+        <span>{message}</span>
+        {onDismiss && <button type="button" onClick={onDismiss} className="shrink-0 font-black">닫기</button>}
+      </div>
+      {showReload && (
+        <button type="button" onClick={reloadPage} className="touch-button mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-rose-600 px-4 py-3 font-black text-white">
+          <RotateCcw size={16} /> 새로고침
+        </button>
+      )}
     </div>
   );
 }
@@ -53,8 +67,25 @@ export default function StudentPage() {
   const { roomId } = useParams();
   const [searchParams] = useSearchParams();
   const ownerUid = searchParams.get("owner") || "";
-  const { room, loading, error } = useRoom(roomId, ownerUid);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const { room, loading, error } = useRoom(roomId, ownerUid, refreshKey);
   const [nickname, setNickname] = useState("");
+
+  // Phones suspend the realtime connection while asleep. Re-subscribe whenever the page becomes
+  // visible again (or the network comes back) so the current phase is loaded automatically.
+  useEffect(() => {
+    function resync() {
+      if (document.visibilityState === "visible") setRefreshKey((current) => current + 1);
+    }
+    document.addEventListener("visibilitychange", resync);
+    window.addEventListener("online", resync);
+    window.addEventListener("pageshow", resync);
+    return () => {
+      document.removeEventListener("visibilitychange", resync);
+      window.removeEventListener("online", resync);
+      window.removeEventListener("pageshow", resync);
+    };
+  }, []);
   const [joining, setJoining] = useState(false);
   const [joinError, setJoinError] = useState("");
   const [authUid, setAuthUid] = useState("");
@@ -99,7 +130,17 @@ export default function StudentPage() {
   }
 
   if (loading || !authReady) return <MobileFrame>방 정보를 불러오는 중입니다.</MobileFrame>;
-  if (error) return <MobileFrame>{error}</MobileFrame>;
+  if (error) {
+    return (
+      <MobileFrame>
+        <div className="rounded-lg bg-white p-5 shadow-lift">
+          <p className="font-bold text-rose-700">{error}</p>
+          <p className="mt-2 text-sm text-slate-500">새로고침 버튼을 누르거나 다시 QR코드를 촬영하세요.</p>
+          <button type="button" onClick={reloadPage} className="touch-button mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-4 text-lg font-black text-white"><RotateCcw size={18} /> 새로고침</button>
+        </div>
+      </MobileFrame>
+    );
+  }
   if (!ownerUid) return <MobileFrame><p>잘못된 QR 주소입니다. 교사가 새 QR을 보여주면 다시 입장하세요.</p><Link className="mt-4 inline-block font-bold text-indigo-600" to="/">메인으로 이동</Link></MobileFrame>;
   if (!room) return <MobileFrame><p>존재하지 않는 방입니다.</p><Link className="mt-4 inline-block font-bold text-indigo-600" to="/">메인으로 이동</Link></MobileFrame>;
 
@@ -407,6 +448,8 @@ function CLevelDiagnosis({ room, uid, student }) {
 function CardSelect({ room, uid, student }) {
   const myTeam = room.teams?.[student.team];
   const isLeader = myTeam?.leaderId === uid;
+  const bothSaved = Boolean(myTeam?.trendCard && myTeam?.techCard);
+  const [editing, setEditing] = useState(!bothSaved);
   const [step, setStep] = useState(myTeam?.trendCard && !myTeam?.techCard ? "tech" : "trend");
   const [selectedTrend, setSelectedTrend] = useState(myTeam?.trendCard || null);
   const [selectedTech, setSelectedTech] = useState(myTeam?.techCard || null);
@@ -417,10 +460,26 @@ function CardSelect({ room, uid, student }) {
     setSelectedTrend(myTeam?.trendCard || null);
     setSelectedTech(myTeam?.techCard || null);
     if (myTeam?.trendCard && !myTeam?.techCard) setStep("tech");
+    if (myTeam?.trendCard && myTeam?.techCard) setEditing(false);
   }, [myTeam?.trendCard, myTeam?.techCard]);
 
+  const canSelect = isLeader && editing;
+
+  function openStep(nextStep) {
+    if (!isLeader) return;
+    if (nextStep === "tech" && !selectedTrend) return;
+    setStep(nextStep);
+    if (!editing) setEditing(true);
+  }
+
   async function confirmTrend() {
-    if (!selectedTrend || !isLeader || busy) return;
+    if (!selectedTrend || !canSelect || busy) return;
+    // First pass: publish the trend right away so the teacher sees progress.
+    // Re-selection (both cards already saved): keep the change local until "확인" saves both together.
+    if (bothSaved) {
+      setStep("tech");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
@@ -434,7 +493,7 @@ function CardSelect({ room, uid, student }) {
   }
 
   async function confirmTech() {
-    if (!selectedTrend || !selectedTech || !isLeader || busy) return;
+    if (!selectedTrend || !selectedTech || !canSelect || busy) return;
     setBusy(true);
     setError("");
     try {
@@ -446,6 +505,7 @@ function CardSelect({ room, uid, student }) {
         { trendCard: selectedTrend, techCard: selectedTech },
         `${myTeam?.teamName || "팀"}이 ${selectedTrend.title} 트렌드와 ${selectedTech.title} 기술카드를 확정했습니다. 교사가 다음 단계로 이동할 때까지 기다려 주세요.`
       );
+      setEditing(false);
     } catch (err) {
       setError(writeErrorMessage(err));
     } finally {
@@ -458,23 +518,33 @@ function CardSelect({ room, uid, student }) {
   const cards = step === "trend" ? TREND_CARDS : TECH_CARDS;
   const selectedCard = step === "trend" ? selectedTrend : selectedTech;
   const imageList = step === "trend" ? trendCardImages : techCardImages;
+  const complete = bothSaved && !editing;
 
   return (
     <section>
       <h2 className="text-2xl font-black">트렌드 및 기술카드 선택</h2>
-      <p className="mt-1 text-sm text-slate-500">{isLeader ? "팀장만 선택하고 확정할 수 있습니다." : myTeam?.leaderId ? "팀장이 카드를 선택하는 중입니다." : "아직 팀장이 없습니다. 선생님께 팀장 지정을 요청하세요."}</p>
+      <p className="mt-1 text-sm text-slate-500">
+        {isLeader
+          ? complete ? "선택이 완료되었습니다. 바꾸려면 '완료' 버튼이나 탭을 누르세요." : "팀장만 선택하고 확정할 수 있습니다."
+          : myTeam?.leaderId ? "팀장이 카드를 선택하는 중입니다." : "아직 팀장이 없습니다. 선생님께 팀장 지정을 요청하세요."}
+      </p>
       <ErrorBanner message={error} onDismiss={() => setError("")} />
-      <div className="mt-4 grid grid-cols-2 gap-2 rounded-lg bg-white p-2 text-center text-sm font-black shadow-lift">
-        <span className={step === "trend" ? "rounded-lg bg-indigo-600 py-2 text-white" : "py-2 text-slate-500"}>{myTeam?.trendCard && <Check size={14} className="mr-1 inline" />}1. 트렌드</span>
-        <span className={step === "tech" ? "rounded-lg bg-indigo-600 py-2 text-white" : "py-2 text-slate-500"}>{myTeam?.techCard && <Check size={14} className="mr-1 inline" />}2. 기술카드</span>
+      <div className="mt-4 grid grid-cols-2 gap-2 rounded-lg bg-white p-2 text-center text-sm font-black shadow-lift" role="tablist" aria-label="카드 종류">
+        <button type="button" role="tab" aria-selected={step === "trend"} onClick={() => openStep("trend")} disabled={!isLeader} className={step === "trend" ? "rounded-lg bg-indigo-600 py-2 text-white" : "py-2 text-slate-500 disabled:opacity-70"}>
+          {myTeam?.trendCard && <Check size={14} className="mr-1 inline" />}1. 트렌드
+        </button>
+        <button type="button" role="tab" aria-selected={step === "tech"} onClick={() => openStep("tech")} disabled={!isLeader || !selectedTrend} className={step === "tech" ? "rounded-lg bg-indigo-600 py-2 text-white" : "py-2 text-slate-500 disabled:opacity-70"}>
+          {myTeam?.techCard && <Check size={14} className="mr-1 inline" />}2. 기술카드
+        </button>
       </div>
-      {myTeam?.trendCard && myTeam?.techCard && (
+      {bothSaved && (
         <div className="mt-3 rounded-lg bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700 ring-1 ring-emerald-200">
           <Check size={16} className="mr-1 inline" /> 카드 선택 완료: {myTeam.trendCard.title} / {myTeam.techCard.title}
+          {editing && isLeader && <span className="mt-1 block text-xs font-bold text-emerald-600">다시 선택 중 — 기술카드 단계에서 '확인'을 누르면 새 선택이 저장됩니다.</span>}
         </div>
       )}
       {step === "tech" && selectedTrend && (
-        <div className="mt-3 rounded-lg bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-700">
+        <div className="mt-3 rounded-lg bg-indigo-50 px-4 py-3 text-sm font-bold text-indigo-700">
           선택한 트렌드: {selectedTrend.title}
         </div>
       )}
@@ -485,15 +555,17 @@ function CardSelect({ room, uid, student }) {
             card={card}
             image={imageList[card.index]}
             selected={selectedCard?.id === card.id}
-            disabled={!isLeader}
+            disabled={!canSelect}
             onClick={() => (step === "trend" ? setSelectedTrend(card) : setSelectedTech(card))}
           />
         ))}
       </div>
-      {step === "trend" ? (
-        <button disabled={!isLeader || !selectedTrend || busy} onClick={confirmTrend} className="touch-button sticky bottom-4 mt-4 w-full rounded-lg bg-indigo-600 px-4 py-4 text-lg font-black text-white shadow-lift disabled:bg-slate-200 disabled:text-slate-400">다음(기술카드 선택하기)</button>
+      {complete ? (
+        <button disabled={!isLeader} onClick={() => openStep("tech")} className="touch-button sticky bottom-4 mt-4 w-full rounded-lg bg-emerald-600 px-4 py-4 text-lg font-black text-white shadow-lift disabled:bg-slate-200 disabled:text-slate-400"><Check size={18} className="mr-1 inline" /> 완료 (다시 선택하려면 누르세요)</button>
+      ) : step === "trend" ? (
+        <button disabled={!canSelect || !selectedTrend || busy} onClick={confirmTrend} className="touch-button sticky bottom-4 mt-4 w-full rounded-lg bg-indigo-600 px-4 py-4 text-lg font-black text-white shadow-lift disabled:bg-slate-200 disabled:text-slate-400">다음(기술카드 선택하기)</button>
       ) : (
-        <button disabled={!isLeader || !selectedTech || busy} onClick={confirmTech} className="touch-button sticky bottom-4 mt-4 w-full rounded-lg bg-indigo-600 px-4 py-4 text-lg font-black text-white shadow-lift disabled:bg-slate-200 disabled:text-slate-400">{busy ? "저장 중..." : "확인"}</button>
+        <button disabled={!canSelect || !selectedTech || busy} onClick={confirmTech} className="touch-button sticky bottom-4 mt-4 w-full rounded-lg bg-indigo-600 px-4 py-4 text-lg font-black text-white shadow-lift disabled:bg-slate-200 disabled:text-slate-400">{busy ? "저장 중..." : "확인"}</button>
       )}
     </section>
   );
@@ -551,12 +623,44 @@ function ResultFireworks({ status }) {
     </div>
   );
 }
+function SelectedCardsStrip({ team }) {
+  const trend = team?.trendCard;
+  const tech = team?.techCard;
+  if (!trend && !tech) return null;
+  const items = [
+    { label: "트렌드", card: trend, image: trend ? trendCardImages[trend.index] : null },
+    { label: "기술카드", card: tech, image: tech ? techCardImages[tech.index] : null }
+  ];
+  return (
+    <div className="selected-cards-strip mt-3">
+      {items.map((item) => (
+        <div key={item.label} className="selected-card-item">
+          {item.image ? <img src={item.image} alt={item.card?.title || item.label} /> : <span className="selected-card-empty">미선택</span>}
+          <div>
+            <p>{item.label}</p>
+            <strong>{item.card?.title || "미선택"}</strong>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function normalizeIdea(savedIdea, emptyIdea) {
+  const merged = { ...emptyIdea, ...(savedIdea || {}) };
+  if (!Array.isArray(merged.problems) || merged.problems.length === 0) {
+    merged.problems = merged.problem ? String(merged.problem).split(", ").filter(Boolean) : [];
+  }
+  return merged;
+}
+
 function Ideation({ room, uid, student }) {
   const team = room.teams?.[student.team];
   const savedIdea = room.teams?.[student.team]?.idea;
   const emptyIdea = {
     serviceName: "",
     problem: "",
+    problems: [],
     customers: [],
     solution: "",
     product: "",
@@ -564,7 +668,7 @@ function Ideation({ room, uid, student }) {
     marketingStrategies: [],
     tagline: ""
   };
-  const [idea, setIdea] = useState(savedIdea || emptyIdea);
+  const [idea, setIdea] = useState(() => normalizeIdea(savedIdea, emptyIdea));
   const [editing, setEditing] = useState(!savedIdea || team?.ideaSubmitted === false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -573,7 +677,7 @@ function Ideation({ room, uid, student }) {
   const locked = Boolean(team?.ideaLocked);
 
   useEffect(() => {
-    if (savedIdea && !editing) setIdea({ ...emptyIdea, ...savedIdea });
+    if (savedIdea && !editing) setIdea(normalizeIdea(savedIdea, emptyIdea));
     if (savedIdea && team?.ideaSubmitted === false) setEditing(true);
   }, [savedIdea, editing, team?.ideaSubmitted]);
 
@@ -583,6 +687,8 @@ function Ideation({ room, uid, student }) {
     const otherTeamsSubmitted = activeTeams
       .filter((teamKey) => teamKey !== student.team)
       .every((teamKey) => room.teams[teamKey]?.idea && room.teams[teamKey]?.ideaSubmitted !== false);
+    // `problem` stays a joined string for the teacher dashboard, prompt and reports.
+    const payload = { ...idea, problems: idea.problems || [], problem: (idea.problems || []).join(", ") };
     setBusy(true);
     setError("");
     try {
@@ -591,7 +697,7 @@ function Ideation({ room, uid, student }) {
         room.ownerUid,
         room.roomId,
         student.team,
-        { idea, ideaSubmitted: true, aiEvaluation: null },
+        { idea: payload, ideaSubmitted: true, aiEvaluation: null },
         otherTeamsSubmitted
           ? "모든 팀의 사업계획이 등록되었습니다. 교사가 사업계획 AI 평가 단계로 이동할 때까지 수정할 수 있습니다."
           : `${team?.teamName || "팀"}이 아이디어를 제출했습니다.`
@@ -626,20 +732,27 @@ function Ideation({ room, uid, student }) {
 
   if (!student.team) return <Notice>먼저 팀을 선택해야 합니다.</Notice>;
 
-  if (submitted && !editing) {
+  // Team members always see the submitted plan; the leader sees it unless they re-opened it for editing.
+  // A teacher-locked plan is always shown as the final summary.
+  const showSummary = submitted && (!isLeader || locked || !editing);
+
+  if (showSummary) {
     return (
       <section>
-        <div className="rounded-lg bg-emerald-600 p-5 text-white shadow-lift">
-          <p className="text-sm font-black text-emerald-100">아이디어 제출 상태</p>
-          <h2 className="mt-2 text-3xl font-black">제출 완료</h2>
-          <p className="mt-2 text-sm leading-6 text-emerald-50">관리자 대시보드에 제출 내용이 반영되었습니다. 수정이 필요하면 아래 버튼을 누르세요.</p>
+        <div className={`rounded-lg p-5 text-white shadow-lift ${locked ? "bg-slate-900" : "bg-emerald-600"}`}>
+          <p className={`text-sm font-black ${locked ? "text-amber-300" : "text-emerald-100"}`}>{locked ? "교사 확정 완료" : "아이디어 제출 상태"}</p>
+          <h2 className="mt-2 text-3xl font-black">{locked ? "우리 팀 사업계획서" : "제출 완료"}</h2>
+          <p className={`mt-2 text-sm leading-6 ${locked ? "text-slate-200" : "text-emerald-50"}`}>
+            {locked ? "교사가 확정한 최종 사업계획서입니다. 이 내용으로 AI 평가와 투자 유치가 진행됩니다." : "관리자 대시보드에 제출 내용이 반영되었습니다. 수정이 필요하면 아래 버튼을 누르세요."}
+          </p>
         </div>
-        <IdeaSummary team={team} idea={{ ...emptyIdea, ...savedIdea }} />
+        <SelectedCardsStrip team={team} />
+        <IdeaSummary team={team} idea={normalizeIdea(savedIdea, emptyIdea)} />
         <ErrorBanner message={error} onDismiss={() => setError("")} />
         {isLeader ? (
           <button disabled={locked || busy} onClick={unlockIdea} className="touch-button mt-4 w-full rounded-lg bg-slate-900 px-4 py-4 text-lg font-black text-white disabled:bg-slate-200 disabled:text-slate-400">{locked ? "관리자 확정 완료" : "제출 해제 및 수정하기"}</button>
         ) : (
-          <Notice>팀장이 제출한 사업계획입니다. 일반 팀원은 보기만 가능합니다.</Notice>
+          <Notice>{locked ? "교사가 확정한 우리 팀 사업계획서입니다." : "팀장이 제출한 사업계획입니다. 일반 팀원은 보기만 가능합니다."}</Notice>
         )}
       </section>
     );
@@ -650,12 +763,14 @@ function Ideation({ room, uid, student }) {
   return (
     <section>
       <h2 className="text-2xl font-black">아이디어 및 사업계획수립</h2>
+      <SelectedCardsStrip team={team} />
       {disabled && <div className="mt-3 rounded-lg bg-amber-50 px-4 py-3 text-sm font-black text-amber-700 ring-1 ring-amber-200">{locked ? "관리자가 사업계획을 확정하여 더 이상 수정할 수 없습니다." : "팀장만 사업계획서를 입력하고 제출할 수 있습니다."}</div>}
       <CanvasBlock title="제품 및 서비스명">
         <input disabled={disabled} value={idea.serviceName} onChange={(event) => setIdea({ ...idea, serviceName: event.target.value })} className="w-full rounded-lg border border-slate-200 px-3 py-3 outline-none focus:border-indigo-500 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" placeholder="예: AI 공부 도우미, 펫케어 매니저" />
       </CanvasBlock>
       <CanvasBlock title="문제정의: 왜 이 사업을 시작하려고 하나요?">
-        <ChipGroup options={PROBLEM_OPTIONS} value={idea.problem} allowCustom disabled={disabled} onChange={(problem) => setIdea({ ...idea, problem })} />
+        <p className="mb-2 text-xs font-bold text-slate-500">중복선택 가능</p>
+        <MultiChipGroup options={PROBLEM_OPTIONS} values={idea.problems} limit={3} allowCustom disabled={disabled} onChange={(problems) => setIdea({ ...idea, problems, problem: problems.join(", ") })} />
       </CanvasBlock>
       <CanvasBlock title="고객정의: 누가 우리의 고객인가요?">
         <p className="mb-2 text-xs font-bold text-slate-500">중복선택 가능</p>
@@ -882,7 +997,9 @@ function Simulation({ room, uid, student }) {
   const displayAsset = getDisplayAsset(myTeam, room.currentMonth || 0);
   const assetNegative = displayAsset < 0;
   const investment = Number(myTeam?.investmentsReceived || 0);
-  const startingTotal = TEAM_BASE_ASSET + investment;
+  const baseAsset = getTeamBaseAsset(myTeam);
+  const startingTotal = getTeamStartingCapital(myTeam);
+  const diversity = myTeam?.diversity;
   const impact = myTeam?.lastEventImpact;
   const impactRate = impact ? Number(impact.rate || 0) : 0;
   const impactAmount = impact ? Number(impact.afterAsset || 0) - Number(impact.beforeAsset || 0) : 0;
@@ -905,7 +1022,11 @@ function Simulation({ room, uid, student }) {
           <div className="rounded-lg bg-white/10 px-3 py-2 text-right"><p className="text-xs text-slate-200">출발 총액</p><p className="text-lg font-black">{formatWon(startingTotal)}</p></div>
         </div>
         <div className="mt-5 grid grid-cols-2 gap-2">
-          <div className="rounded-lg bg-white/10 p-3"><p className="text-xs text-slate-200">기본 자본금</p><p className="text-xl font-black">{formatWon(TEAM_BASE_ASSET)}</p></div>
+          <div className="rounded-lg bg-white/10 p-3">
+            <p className="text-xs text-slate-200">기본 자본금</p>
+            <p className={`text-xl font-black ${baseAsset !== TEAM_BASE_ASSET ? "text-rose-300" : ""}`}>{formatWon(baseAsset)}</p>
+            {diversity && <span className={`diversity-badge diversity-badge-${diversity.key} mt-1`}>{diversity.label} {diversity.rate > 0 ? "+" : ""}{diversity.rate}%</span>}
+          </div>
           <div className="rounded-lg bg-white/10 p-3"><p className="text-xs text-slate-200">투자 유치금</p><p className="text-xl font-black">{formatWon(investment)}</p></div>
         </div>
         <div className="mt-5 rounded-lg bg-white p-4 text-slate-950"><p className="text-sm font-black text-slate-500">현재 우리 팀 총 자산</p><p className={`mt-1 text-4xl font-black ${assetNegative ? "text-rose-600" : "text-indigo-600"}`}>{formatWon(displayAsset)}</p></div>
@@ -939,6 +1060,7 @@ function StudentAiEvaluationReport({ team }) {
     <article className="mt-4 rounded-lg bg-white p-4 shadow-lift">
       <p className="text-sm font-black text-indigo-600">AI 평가결과</p>
       <h3 className="mt-1 break-keep text-xl font-black">{team.teamName} 사업계획 리포트</h3>
+      {team.idea?.serviceName && <p className="mt-1 text-sm font-bold text-slate-600"><span className="text-slate-400">제품 및 서비스명</span> · {team.idea.serviceName}</p>}
       <p className="mt-3 rounded-lg bg-indigo-50 p-3 text-sm font-bold leading-6 text-indigo-800">{evaluation?.opinion || "아직 평가 의견이 없습니다."}</p>
       <div className="mt-3 grid gap-2">
         {BUSINESS_FACTORS.map((factor) => {
@@ -962,7 +1084,7 @@ function StudentEventShowcase({ event, impact, month, team }) {
   const [impactVisible, setImpactVisible] = useState(false);
   const activeImpact = impact?.eventId === event.id ? impact : null;
   const rate = activeImpact ? Number(activeImpact.rate || 0) : 0;
-  const currentAsset = Number(team?.currentAsset ?? team?.initialCapital ?? TEAM_BASE_ASSET);
+  const currentAsset = Number(team?.currentAsset ?? getTeamStartingCapital(team));
   const beforeAsset = Number(activeImpact?.beforeAsset ?? currentAsset);
   const afterAsset = Number(activeImpact?.afterAsset ?? currentAsset);
   const changedAmount = afterAsset - beforeAsset;
@@ -989,14 +1111,17 @@ function StudentEventShowcase({ event, impact, month, team }) {
     <div className="student-event-showcase" key={`${month}-${event.id}`}>
       <div className="event-spark event-spark-one" />
       <div className="event-spark event-spark-two" />
-      <EventCardVisual event={event}>
+      <div className="student-event-card-wrap">
+        <EventCardVisual event={event} />
         {impactVisible && activeImpact && (
-          <div className={`student-impact-number ${rate >= 0 ? "student-impact-positive" : "student-impact-negative"}`}>
+          <div className={`student-impact-badge ${rate >= 0 ? "student-impact-positive" : "student-impact-negative"}`} role="status" aria-live="polite">
+            <span className="student-impact-ring" aria-hidden="true" />
             <span className="student-impact-arrow">{rate >= 0 ? "▲" : "▼"}</span>
-            {rate > 0 ? "+" : ""}{rate}%!!
+            <span className="student-impact-value">{rate > 0 ? "+" : ""}{rate}%</span>
+            <span className="student-impact-caption">{rate >= 0 ? "자산 증가" : "자산 감소"} · {activeImpact.grade}</span>
           </div>
         )}
-      </EventCardVisual>
+      </div>
       <div className={`student-event-asset-overlay ${activeImpact ? "student-event-asset-applied" : "student-event-asset-waiting"} ${changedAmount < 0 ? "student-event-asset-negative" : "student-event-asset-positive"}`}>
         <div>
           <p>{activeImpact ? "우리 팀 실시간 자산" : "현재 자산 현황"}</p>
@@ -1109,7 +1234,7 @@ function AssetBars({ teams, currentMonth = 0 }) {
 }
 
 function AssetChangeSummary({ team, featured = false, className = "" }) {
-  const initial = Number(team.initialCapital || TEAM_BASE_ASSET + Number(team.investmentsReceived || 0));
+  const initial = getTeamStartingCapital(team);
   const final = Number(team.currentAsset || 0);
   const rate = initial ? ((final - initial) / initial) * 100 : 0;
   const positive = rate >= 0;
@@ -1220,8 +1345,8 @@ function normalizeAssetHistory(team) {
   const history = Array.isArray(team.assetHistory) && team.assetHistory.length > 1
     ? team.assetHistory
     : [
-        { month: 0, asset: Number(team.initialCapital || TEAM_BASE_ASSET) },
-        { month: 24, asset: Number(team.currentAsset || team.initialCapital || TEAM_BASE_ASSET) }
+        { month: 0, asset: getTeamStartingCapital(team) },
+        { month: 24, asset: Number(team.currentAsset || getTeamStartingCapital(team)) }
       ];
   const sampled = history.filter((point, index) => {
     const month = Number(point.month || 0);
@@ -1236,7 +1361,7 @@ function normalizeAssetHistory(team) {
 function getDisplayAsset(team, currentMonth) {
   if (!team) return 0;
   if (currentMonth > 0 || team.lastEventImpact) return Number(team.currentAsset || 0);
-  return Number(team.initialCapital || TEAM_BASE_ASSET + Number(team.investmentsReceived || 0));
+  return getTeamStartingCapital(team);
 }
 
 function EventCardVisual({ event, children }) {

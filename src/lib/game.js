@@ -159,17 +159,68 @@ export function computeInvestmentsReceived(students = {}, teams = {}) {
 }
 
 /**
- * Returns teams with `investmentsReceived` derived from students. Once the simulation has started the
- * value stored on the team document (frozen by the teacher at kick-off) wins so late edits cannot
- * change a running game.
+ * C-level diversity bonus. Evaluated over team members who finished the self-diagnosis; at least
+ * three diagnosed members are required before any badge applies.
+ */
+export const TEAM_DIVERSITY_LEVELS = {
+  excellent: { key: "excellent", label: "팀 다양성 탁월", rate: 35 },
+  good: { key: "good", label: "팀 다양성 우수", rate: 10 },
+  poor: { key: "poor", label: "팀 다양성 불리", rate: -10 },
+  risky: { key: "risky", label: "팀 다양성 위험", rate: -25 }
+};
+
+export function computeTeamDiversity(members = []) {
+  const keys = members.map((member) => member?.cLevelResult?.key).filter(Boolean);
+  if (keys.length < 3) return null;
+  const counts = {};
+  for (const key of keys) counts[key] = (counts[key] || 0) + 1;
+  const distinct = Object.keys(counts).length;
+  const maxCount = Math.max(...Object.values(counts));
+  if (distinct === 1) return TEAM_DIVERSITY_LEVELS.risky;
+  if (distinct === keys.length) return TEAM_DIVERSITY_LEVELS.excellent;
+  if (maxCount >= 3) return TEAM_DIVERSITY_LEVELS.poor;
+  if (distinct >= 3) return TEAM_DIVERSITY_LEVELS.good;
+  return null;
+}
+
+export function computeBaseAsset(diversity) {
+  return Math.round(TEAM_BASE_ASSET * (1 + Number(diversity?.rate || 0) / 100));
+}
+
+/** Base asset of a team including the diversity bonus (frozen value wins once stored). */
+export function getTeamBaseAsset(team) {
+  const stored = Number(team?.baseAsset);
+  return Number.isFinite(stored) && stored > 0 ? stored : TEAM_BASE_ASSET;
+}
+
+/** Starting capital = base asset (with diversity bonus) + investments received. */
+export function getTeamStartingCapital(team) {
+  const initial = Number(team?.initialCapital);
+  if (Number.isFinite(initial) && initial > 0 && team?.baseAsset) return initial;
+  return getTeamBaseAsset(team) + Number(team?.investmentsReceived || 0);
+}
+
+/**
+ * Returns teams with the derived fields `investmentsReceived`, `diversity`, `baseAsset` and
+ * `memberCount` computed from the student records. Once the simulation has started the values stored
+ * on the team document (frozen by the teacher at kick-off) win so late edits cannot change a running game.
  */
 export function withDerivedInvestments(teams = {}, students = {}, status = "WAITING") {
   const frozen = ["SIMULATION", "RESULT"].includes(status);
-  const hasStudentRecords = Object.keys(students).length > 0;
-  if (frozen || !hasStudentRecords) return teams;
   const totals = computeInvestmentsReceived(students, teams);
   return Object.fromEntries(
-    Object.entries(teams).map(([key, team]) => [key, { ...team, investmentsReceived: totals[key] || 0 }])
+    Object.entries(teams).map(([key, team]) => {
+      const members = getStudentsByTeam(students, key);
+      if (frozen) return [key, { ...team, memberCount: members.length }];
+      const diversity = computeTeamDiversity(members);
+      return [key, {
+        ...team,
+        memberCount: members.length,
+        investmentsReceived: totals[key] || 0,
+        diversity,
+        baseAsset: computeBaseAsset(diversity)
+      }];
+    })
   );
 }
 

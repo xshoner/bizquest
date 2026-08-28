@@ -39,7 +39,12 @@ function permissionMessage(err, fallback) {
   return err?.message || fallback;
 }
 
-export function useRoom(roomId, ownerUid) {
+/**
+ * @param {string|null} roomId
+ * @param {string} [ownerUid]
+ * @param {number} [refreshKey] bump to force the listeners to re-subscribe (e.g. when a phone wakes up)
+ */
+export function useRoom(roomId, ownerUid, refreshKey = 0) {
   const [room, setRoom] = useState(null);
   const [loading, setLoading] = useState(Boolean(roomId));
   const [error, setError] = useState("");
@@ -134,7 +139,7 @@ export function useRoom(roomId, ownerUid) {
       stopListeners();
       if (unsubscribeAuth) unsubscribeAuth();
     };
-  }, [ownerUid, roomId]);
+  }, [ownerUid, roomId, refreshKey]);
 
   return { room, loading, error };
 }
