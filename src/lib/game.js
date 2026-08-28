@@ -178,8 +178,9 @@ export function computeTeamDiversity(members = []) {
   const maxCount = Math.max(...Object.values(counts));
   if (distinct === 1) return TEAM_DIVERSITY_LEVELS.risky;
   if (distinct === keys.length) return TEAM_DIVERSITY_LEVELS.excellent;
-  if (maxCount >= 3) return TEAM_DIVERSITY_LEVELS.poor;
+  // When both apply (e.g. A,A,A,B,C) the diversity reward wins over the concentration penalty.
   if (distinct >= 3) return TEAM_DIVERSITY_LEVELS.good;
+  if (maxCount >= 3) return TEAM_DIVERSITY_LEVELS.poor;
   return null;
 }
 
@@ -222,6 +223,24 @@ export function withDerivedInvestments(teams = {}, students = {}, status = "WAIT
       }];
     })
   );
+}
+
+/** Start → final asset change of a team, for reports. */
+export function getAssetChange(team) {
+  const initial = getTeamStartingCapital(team);
+  const final = Number(team?.currentAsset || 0);
+  const delta = final - initial;
+  const rate = initial ? (delta / initial) * 100 : 0;
+  return { initial, final, delta, rate, positive: delta >= 0 };
+}
+
+/** Counts AI factor grades (양호/보통/취약) for a team. */
+export function countAiGrades(team) {
+  const counts = { 양호: 0, 보통: 0, 취약: 0 };
+  for (const item of Object.values(team?.aiEvaluation?.factors || {})) {
+    if (item?.grade in counts) counts[item.grade] += 1;
+  }
+  return counts;
 }
 
 export function makeNextTeamKey(teams = {}) {

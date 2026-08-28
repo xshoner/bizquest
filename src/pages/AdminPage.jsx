@@ -56,6 +56,8 @@ import {
   getTeamBaseAsset,
   getTeamEntries,
   getTeamStartingCapital,
+  getAssetChange,
+  countAiGrades,
   makeInitialRoom,
   makeNextTeamKey,
   makeRoomId,
@@ -1926,18 +1928,46 @@ function AiOpinionModal({ team, onClose }) {
 
 function ResultBoard({ rankedTeams, teams, students, room }) {
   const winner = rankedTeams[0];
+  const podium = [rankedTeams[1], rankedTeams[0], rankedTeams[2]];
+  const participantCount = Object.keys(students).length;
+  const totalFinal = rankedTeams.reduce((sum, team) => sum + Number(team.currentAsset || 0), 0);
+  const totalInitial = rankedTeams.reduce((sum, team) => sum + getAssetChange(team).initial, 0);
+  const classRate = totalInitial ? ((totalFinal - totalInitial) / totalInitial) * 100 : 0;
+  const finishedAt = new Intl.DateTimeFormat("ko-KR", { dateStyle: "long", timeStyle: "short" }).format(new Date(room.updatedAt || Date.now()));
+
   return (
-    <section className="print-report rounded-lg bg-white p-5 shadow-lift">
-      <h2 className="text-xl font-black">최종 순위 및 사업 리포트</h2>
-      <p className="mt-1 hidden text-sm text-slate-500 print:block">{room.roomTitle} · 참가자 {Object.keys(students).length}명</p>
+    <section className="print-report report-board">
+      <header className="report-header">
+        <div>
+          <p className="report-kicker"><Trophy size={16} /> FINAL REPORT</p>
+          <h2>최종 순위 및 사업 리포트</h2>
+          <p className="report-meta">{room.roomTitle} · 방 코드 {room.roomId} · 참가자 {participantCount}명 · 팀 {rankedTeams.length}개 · {finishedAt}</p>
+        </div>
+        <div className="report-kpis">
+          <div>
+            <p>24개월 후 학급 총 자산</p>
+            <strong>{formatWon(totalFinal)}</strong>
+          </div>
+          <div className={classRate >= 0 ? "report-kpi-up" : "report-kpi-down"}>
+            <p>학급 평균 증감율</p>
+            <strong>{classRate >= 0 ? "+" : ""}{classRate.toFixed(1)}%</strong>
+          </div>
+        </div>
+      </header>
+
       {winner && (
-        <article className="winner-report-card mt-4 overflow-hidden rounded-lg bg-gradient-to-br from-amber-300 via-orange-500 to-rose-600 p-1 shadow-[0_18px_45px_rgba(245,158,11,0.35)]">
+        <article className="winner-report-card mt-5 overflow-hidden rounded-lg bg-gradient-to-br from-amber-300 via-orange-500 to-rose-600 p-1 shadow-[0_18px_45px_rgba(245,158,11,0.35)]">
           <div className="rounded-lg bg-white/95 p-5">
             <div className="winner-crown-badge"><Crown size={42} /><span>1위 팀</span></div>
-            <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-              <div>
+            <div className="mt-2 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+              <div className="min-w-0">
                 <h3 className="text-4xl font-black text-slate-950">{winner.teamName}</h3>
-                <p className="mt-2 text-sm font-bold text-slate-600">{winner.idea?.serviceName || winner.idea?.product || "사업 아이디어"}</p>
+                <p className="mt-2 text-base font-black text-indigo-700">{winner.idea?.serviceName || winner.idea?.product || "사업 아이디어"}</p>
+                {winner.idea?.tagline && <p className="mt-1 text-sm font-bold text-slate-500">“{winner.idea.tagline}”</p>}
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {winner.diversity && <span className={`diversity-badge diversity-badge-${winner.diversity.key}`}><Sparkles size={13} /> {winner.diversity.label} <b>{winner.diversity.rate > 0 ? "+" : ""}{winner.diversity.rate}%</b></span>}
+                  <AiGradeTally team={winner} />
+                </div>
               </div>
               <AssetChangeSummary team={winner} featured />
             </div>
@@ -1945,55 +1975,121 @@ function ResultBoard({ rankedTeams, teams, students, room }) {
           </div>
         </article>
       )}
-      <div className="mt-4 grid gap-3 md:grid-cols-3">
-        {rankedTeams.slice(0, 3).map((team, index) => (
-          <div key={team.key} className={`rounded-lg p-4 text-center ${index === 0 ? "bg-amber-50 ring-2 ring-amber-300" : "bg-slate-50"}`}>
-            <p className={`text-3xl font-black ${index === 0 ? "text-amber-600" : "text-indigo-600"}`}>{index + 1}위</p>
-            <p className="mt-2 font-black">{team.teamName}</p>
-            <p className={`text-sm ${index === 0 ? "font-black text-slate-950" : Number(team.currentAsset || 0) < 0 ? "font-bold text-rose-600" : "text-slate-500"}`}>{formatWon(team.currentAsset || 0)}</p>
-          </div>
-        ))}
-      </div>
-      <div className="mt-5 grid gap-3">
-        {rankedTeams.map((team, index) => (
-          <article key={team.key} className={`rounded-lg border p-4 ${index === 0 ? "border-amber-300 bg-amber-50/60" : "border-slate-200"}`}>
-            <div className="flex items-center justify-between gap-3"><h3 className="font-black">{index + 1}. {team.teamName}</h3><span className={`font-black ${index === 0 ? "text-amber-700" : Number(team.currentAsset || 0) < 0 ? "text-rose-600" : "text-indigo-600"}`}>{formatWon(team.currentAsset || 0)}</span></div>
-            <AssetChangeSummary team={team} className="mt-3" />
-            <div className="mt-3 flex flex-wrap gap-2">
-              {getStudentsByTeam(students, team.key).map((member) => (
-                <span key={member.uid} className="rounded-full bg-white px-3 py-2 text-xs font-black text-slate-700 ring-1 ring-slate-200">{member.nickname}</span>
-              ))}
+
+      <div className="report-podium mt-5">
+        {podium.map((team, index) => {
+          if (!team) return <div key={index} />;
+          const place = index === 1 ? 1 : index === 0 ? 2 : 3;
+          const change = getAssetChange(team);
+          return (
+            <div key={team.key} className={`report-podium-step report-podium-${place}`}>
+              <span className={`rank-medal rank-medal-${place}`}>{place}</span>
+              <p className="report-podium-name">{team.teamName}</p>
+              <p className={`report-podium-asset ${change.positive ? "text-emerald-600" : "text-rose-600"}`}>{formatWon(change.final)}</p>
+              <p className={`report-podium-rate ${change.positive ? "report-rate-up" : "report-rate-down"}`}>{change.positive ? "▲ +" : "▼ "}{change.rate.toFixed(1)}%</p>
             </div>
-            <p className="mt-2 text-sm text-slate-600">트렌드: {team.trendCard?.title || "미선택"}</p>
-            <p className="mt-1 text-sm text-slate-600">기술카드: {team.techCard?.title || "미선택"}</p>
-            <p className="mt-1 text-sm text-slate-600">아이디어: {team.idea?.product || team.idea?.solution || "-"}</p>
-            <AssetTrendChart team={team} className="mt-4" />
-          </article>
-        ))}
+          );
+        })}
+      </div>
+
+      <div className="mt-6 grid gap-4">
+        {rankedTeams.map((team, index) => {
+          const change = getAssetChange(team);
+          const members = getStudentsByTeam(students, team.key);
+          return (
+            <article key={team.key} className={`report-team-card ${index === 0 ? "report-team-card-winner" : ""}`}>
+              <div className="report-team-head">
+                <div className="flex min-w-0 items-center gap-3">
+                  <span className={`rank-medal rank-medal-lg rank-medal-${Math.min(index + 1, 4)}`}>{index + 1}</span>
+                  <div className="min-w-0">
+                    <h3 className="truncate text-xl font-black">{team.teamName}</h3>
+                    <p className="truncate text-sm font-bold text-indigo-700">{team.idea?.serviceName || team.idea?.product || "사업 아이디어 미작성"}</p>
+                  </div>
+                </div>
+                <div className={`report-final-asset ${change.positive ? "report-final-up" : "report-final-down"}`}>
+                  <p>최종 총 자산</p>
+                  <strong>{formatWon(change.final)}</strong>
+                  <span>{change.positive ? "▲ +" : "▼ "}{formatWon(change.delta)} ({change.positive ? "+" : ""}{change.rate.toFixed(1)}%)</span>
+                </div>
+              </div>
+
+              <AssetChangeSummary team={team} className="mt-4" />
+
+              <div className="report-team-grid mt-4">
+                <div className="report-team-block">
+                  <p className="report-block-title"><Users size={14} /> 팀원 {members.length}명</p>
+                  <div className="flex flex-wrap gap-2">
+                    {members.map((member) => (
+                      <span key={member.uid} className="report-member-chip">
+                        {team.leaderId === member.uid && <Crown size={12} className="text-amber-500" />}
+                        {member.nickname}
+                        {member.cLevelResult?.key && <b className={`c-level-mini-badge c-level-mini-${member.cLevelResult.key}`}>{member.cLevelResult.key}</b>}
+                      </span>
+                    ))}
+                    {members.length === 0 && <span className="text-sm text-slate-400">팀원 없음</span>}
+                  </div>
+                  {team.diversity && (
+                    <span className={`diversity-badge diversity-badge-${team.diversity.key} mt-3`}><Sparkles size={13} /> {team.diversity.label} <b>{team.diversity.rate > 0 ? "+" : ""}{team.diversity.rate}%</b></span>
+                  )}
+                </div>
+                <div className="report-team-block">
+                  <p className="report-block-title"><Lightbulb size={14} /> 사업 개요</p>
+                  <dl className="report-dl">
+                    <dt>트렌드</dt><dd>{team.trendCard?.title || "미선택"}</dd>
+                    <dt>기술카드</dt><dd>{team.techCard?.title || "미선택"}</dd>
+                    <dt>문제정의</dt><dd>{team.idea?.problem || "-"}</dd>
+                    <dt>고객</dt><dd>{(team.idea?.customers || []).join(", ") || "-"}</dd>
+                    <dt>제품/서비스</dt><dd>{team.idea?.product || team.idea?.solution || "-"}</dd>
+                    <dt>수익모델</dt><dd>{(team.idea?.revenueModels || []).join(", ") || "-"}</dd>
+                  </dl>
+                </div>
+                <div className="report-team-block">
+                  <p className="report-block-title"><ClipboardCheck size={14} /> AI 평가</p>
+                  <AiGradeTally team={team} />
+                  <p className="mt-2 text-sm leading-6 text-slate-600">{team.aiEvaluation?.opinion || "AI 평가 의견이 없습니다."}</p>
+                  <div className="report-capital mt-3">
+                    <span>기본 자산 {formatWon(getTeamBaseAsset(team))}</span>
+                    <span>투자 유치 {formatWon(team.investmentsReceived || 0)}</span>
+                  </div>
+                </div>
+              </div>
+
+              <AssetTrendChart team={team} className="mt-4" />
+            </article>
+          );
+        })}
       </div>
     </section>
   );
 }
 
 function AssetChangeSummary({ team, featured = false, className = "" }) {
-  const initial = getTeamStartingCapital(team);
-  const final = Number(team.currentAsset || 0);
-  const rate = initial ? ((final - initial) / initial) * 100 : 0;
-  const positive = rate >= 0;
+  const { initial, final, delta, rate, positive } = getAssetChange(team);
+  const tone = positive ? "asset-change-up" : "asset-change-down";
   return (
-    <div className={`asset-change-summary ${featured ? "asset-change-summary-featured" : ""} ${className}`}>
+    <div className={`asset-change-summary ${tone} ${featured ? "asset-change-summary-featured" : ""} ${className}`}>
       <div>
         <p>최초 총 자산</p>
         <strong>{formatWon(initial)}</strong>
       </div>
-      <div>
+      <div className="asset-change-arrow" aria-hidden="true">{positive ? "▶" : "▶"}</div>
+      <div className="asset-change-final">
         <p>최종 총 자산</p>
         <strong>{formatWon(final)}</strong>
+        <span className="asset-change-delta">{positive ? "▲ +" : "▼ "}{formatWon(delta)} · {positive ? "+" : ""}{rate.toFixed(1)}%</span>
       </div>
-      <div className={positive ? "asset-change-positive" : "asset-change-negative"}>
-        <p>증감율</p>
-        <strong>{positive ? "+" : ""}{rate.toFixed(1)}%</strong>
-      </div>
+    </div>
+  );
+}
+
+function AiGradeTally({ team }) {
+  if (!team?.aiEvaluation) return null;
+  const counts = countAiGrades(team);
+  return (
+    <div className="ai-grade-tally" aria-label="AI 평가 등급 분포">
+      <span className="ai-grade-tally-good">양호 {counts.양호}</span>
+      <span className="ai-grade-tally-mid">보통 {counts.보통}</span>
+      <span className="ai-grade-tally-weak">취약 {counts.취약}</span>
     </div>
   );
 }

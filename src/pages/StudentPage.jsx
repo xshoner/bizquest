@@ -16,7 +16,7 @@ import {
   TECH_CARDS,
   TREND_CARDS
 } from "../data/gameData.js";
-import { INVESTMENT_BUDGET, INVESTMENT_STEP, TEAM_BASE_ASSET, formatWon, getStudentsByTeam, getTeamBaseAsset, getTeamEntries, getTeamStartingCapital, makeStudent, normalizeTeamName, rankTeams, sumInvestments } from "../lib/game.js";
+import { INVESTMENT_BUDGET, INVESTMENT_STEP, TEAM_BASE_ASSET, formatWon, getAssetChange, getStudentsByTeam, getTeamBaseAsset, getTeamEntries, getTeamStartingCapital, makeStudent, normalizeTeamName, rankTeams, sumInvestments } from "../lib/game.js";
 import { studentDocRef, useRoom } from "../hooks/useRoom.js";
 import { updateOwnStudent, updateOwnTeam } from "../lib/roomStore.js";
 
@@ -1192,11 +1192,16 @@ function Result({ room }) {
         })}
       </div>
       <div className="mt-5 space-y-2">
-        {rankedTeams.map((team, index) => (
-          <button key={team.key} onClick={() => setSelected(team)} className={`touch-button w-full rounded-lg px-4 py-3 text-left shadow-lift ${index === 0 ? "bg-amber-50 ring-2 ring-amber-300" : "bg-white"}`}>
+        {rankedTeams.map((team, index) => {
+          const change = getAssetChange(team);
+          return (
+          <button key={team.key} onClick={() => setSelected(team)} className={`touch-button report-row w-full rounded-lg px-4 py-3 text-left shadow-lift ${index === 0 ? "bg-amber-50 ring-2 ring-amber-300" : "bg-white"}`}>
             <div className="flex items-center justify-between gap-3">
-              <span className="font-black">{index + 1}. {team.teamName}</span>
-              <span className={`font-bold ${index === 0 ? "text-amber-700" : Number(team.currentAsset || 0) < 0 ? "text-rose-600" : "text-indigo-600"}`}>{formatWon(team.currentAsset || 0)}</span>
+              <span className="flex items-center gap-2 font-black"><span className={`rank-medal rank-medal-${Math.min(index + 1, 4)}`}>{index + 1}</span>{team.teamName}</span>
+              <span className={`text-right font-black ${change.positive ? "text-emerald-600" : "text-rose-600"}`}>
+                {formatWon(change.final)}
+                <small className="block text-[11px] font-black">{change.positive ? "▲ +" : "▼ "}{change.rate.toFixed(1)}%</small>
+              </span>
             </div>
             <AssetChangeSummary team={team} className="mt-2" />
             <div className="mt-2 flex flex-wrap gap-1">
@@ -1205,7 +1210,8 @@ function Result({ room }) {
               ))}
             </div>
           </button>
-        ))}
+          );
+        })}
       </div>
       {selected && <ReportModal team={selected} members={getStudentsByTeam(room.students, selected.key)} onClose={() => setSelected(null)} />}
     </section>
@@ -1234,23 +1240,19 @@ function AssetBars({ teams, currentMonth = 0 }) {
 }
 
 function AssetChangeSummary({ team, featured = false, className = "" }) {
-  const initial = getTeamStartingCapital(team);
-  const final = Number(team.currentAsset || 0);
-  const rate = initial ? ((final - initial) / initial) * 100 : 0;
-  const positive = rate >= 0;
+  const { initial, final, delta, rate, positive } = getAssetChange(team);
+  const tone = positive ? "asset-change-up" : "asset-change-down";
   return (
-    <div className={`asset-change-summary ${featured ? "asset-change-summary-featured" : ""} ${className}`}>
+    <div className={`asset-change-summary ${tone} ${featured ? "asset-change-summary-featured" : ""} ${className}`}>
       <div>
         <p>최초 총 자산</p>
         <strong>{formatWon(initial)}</strong>
       </div>
-      <div>
+      <div className="asset-change-arrow" aria-hidden="true">▶</div>
+      <div className="asset-change-final">
         <p>최종 총 자산</p>
         <strong>{formatWon(final)}</strong>
-      </div>
-      <div className={positive ? "asset-change-positive" : "asset-change-negative"}>
-        <p>증감율</p>
-        <strong>{positive ? "+" : ""}{rate.toFixed(1)}%</strong>
+        <span className="asset-change-delta">{positive ? "▲ +" : "▼ "}{formatWon(delta)} · {positive ? "+" : ""}{rate.toFixed(1)}%</span>
       </div>
     </div>
   );
@@ -1516,11 +1518,14 @@ function TextModal({ field, value, onSave, onClose }) {
 }
 
 function ReportModal({ team, members = [], onClose }) {
-  const profit = Number(team.currentAsset || 0) - Number(team.initialCapital || 0);
+  const change = getAssetChange(team);
+  const profit = change.delta;
   return (
-    <div className="fixed inset-0 z-20 flex items-end bg-slate-900/50 p-4">
-      <div className="max-h-[86vh] w-full overflow-y-auto rounded-lg bg-white p-5 shadow-lift">
+    <div className="fixed inset-0 z-20 flex items-end bg-slate-900/50 p-4" onClick={onClose}>
+      <div className="max-h-[86vh] w-full overflow-y-auto rounded-lg bg-white p-5 shadow-lift" onClick={(event) => event.stopPropagation()}>
         <h3 className="text-2xl font-black">{team.teamName} 성적표</h3>
+        {team.idea?.serviceName && <p className="mt-1 text-sm font-bold text-indigo-700">{team.idea.serviceName}</p>}
+        <AssetChangeSummary team={team} featured className="mt-3" />
         <div className="mt-3 flex flex-wrap gap-2">
           {members.map((member) => (
             <span key={member.uid} className="rounded-full bg-slate-100 px-3 py-2 text-xs font-black text-slate-700 ring-1 ring-slate-200">{member.nickname}</span>
@@ -1535,9 +1540,9 @@ function ReportModal({ team, members = [], onClose }) {
           <p><b>고객정의:</b> {(team.idea?.customers || []).join(", ") || "-"}</p>
           <p><b>제품/서비스:</b> {team.idea?.product || "-"}</p>
           <p><b>수익모델:</b> {(team.idea?.revenueModels || []).join(", ") || "-"}</p>
-          <p><b>최초 총 자산:</b> {formatWon(team.initialCapital || 0)}</p>
-          <p><b>최종 총 자산:</b> {formatWon(team.currentAsset || 0)}</p>
-          <p><b>최종 수익:</b> <span className={profit >= 0 ? "text-emerald-600" : "text-rose-600"}>{formatWon(profit)}</span></p>
+          <p><b>최초 총 자산:</b> {formatWon(change.initial)}</p>
+          <p><b>최종 총 자산:</b> <span className={`font-black ${change.positive ? "text-emerald-600" : "text-rose-600"}`}>{formatWon(change.final)}</span></p>
+          <p><b>최종 수익:</b> <span className={`font-black ${profit >= 0 ? "text-emerald-600" : "text-rose-600"}`}>{profit >= 0 ? "+" : ""}{formatWon(profit)}</span></p>
         </div>
         <button onClick={onClose} className="touch-button mt-5 w-full rounded-lg bg-slate-900 px-4 py-3 font-bold text-white">닫기</button>
       </div>
