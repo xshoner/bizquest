@@ -8,8 +8,6 @@ import {
   BarChart3,
   Building2,
   ChevronDown,
-  ChevronLeft,
-  ChevronRight,
   ChevronUp,
   CheckCircle2,
   ClipboardCheck,
@@ -47,6 +45,7 @@ import {
 import { collection, db, getCurrentIdToken, getDoc, getDocs, setDoc, updateDoc } from "../firebase.js";
 import { BUSINESS_FACTORS, STATUSES, STATUS_LABELS } from "../data/gameData.js";
 import {
+  SIMULATION_MONTHS,
   TEAM_BASE_ASSET,
   applyRiskMultiplier,
   drawEvent,
@@ -71,8 +70,11 @@ import { useAppSettings } from "../lib/appSettings.js";
 import { roomDocRef, useRoom } from "../hooks/useRoom.js";
 import { loginTeacher, logoutTeacher, registerTeacher, useTeacherAuth } from "../hooks/useTeacherAuth.js";
 import simulationBgm from "../images/bgm01.mp3";
-import heroBackgroundImage from "../images/landing-hero-ai-v2.png";
-import processRoadmapImage from "../images/landing-process-roadmap.png";
+import heroBackgroundImage from "../images/landing-hero-ai-v2.webp";
+import processRoadmapImage from "../images/landing-process-roadmap.webp";
+import { AiEvaluationShowcase, EventCardVisual, FanfareOnResult, ResultFinalizingShowcase, ResultFireworks } from "../components/shared/Effects.jsx";
+import { AssetChangeSummary, AssetTrendChart, gradeClassName } from "../components/shared/AssetCharts.jsx";
+import { playWhoosh } from "../lib/audio.js";
 
 const PHASES = [
   STATUSES.WAITING,
@@ -94,19 +96,15 @@ const PHASE_ICONS = {
   [STATUSES.SIMULATION]: Cpu,
   [STATUSES.RESULT]: Trophy
 };
+/** Interval between simulated months. */
 const SIMULATION_EVENT_DELAY = 5000;
+/** Delay between announcing an event and applying its asset impact. */
+const SIMULATION_EVENT_APPLY_DELAY = 1500;
+/** Time before the result board is revealed after the teacher presses "최종 결과". */
+const RESULT_FINALIZE_DELAY = 3000;
 const SIMULATION_LEASE_TIMEOUT = 12000;
 const AI_EVALUATION_LEASE_TIMEOUT = 15000;
-const SIMULATION_SPEEDS = {
-  slow: { label: "느림", rate: "5초", delay: SIMULATION_EVENT_DELAY },
-  normal: { label: "보통", rate: "5초", delay: SIMULATION_EVENT_DELAY },
-  fast: { label: "빠르게", rate: "5초", delay: SIMULATION_EVENT_DELAY }
-};
-const eventCardImages = Object.fromEntries(
-  Object.entries(import.meta.glob("../images/E*.png", { eager: true, import: "default" }))
-    .map(([path, image]) => [path.match(/E\d{2}/)?.[0], image])
-    .filter(([id]) => id)
-);
+const AI_HEARTBEAT_INTERVAL = 5000;
 
 function makeAdminSessionId() {
   if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
@@ -568,7 +566,9 @@ export default function AdminPage() {
   const [recentRooms, setRecentRooms] = useState([]);
   const [recentRoomsLoading, setRecentRoomsLoading] = useState(false);
   const [deletingRoomId, setDeletingRoomId] = useState("");
-  const intervalRef = useRef(null);
+  const simulationTimerRef = useRef(null); // next-month timer
+  const applyTimerRef = useRef(null); // pending "apply event impact" timer
+  const simulationActiveRef = useRef(false); // true while this tab drives the simulation
   const aiHeartbeatRef = useRef(null);
   const finalizeTimerRef = useRef(null);
   const adminSessionIdRef = useRef(makeAdminSessionId());
@@ -576,7 +576,8 @@ export default function AdminPage() {
   const resultBoardRef = useRef(null);
 
   useEffect(() => () => {
-    if (intervalRef.current) clearInterval(intervalRef.current);
+    clearSimulationTimers();
+    simulationActiveRef.current = false;
     if (aiHeartbeatRef.current) clearInterval(aiHeartbeatRef.current);
     if (finalizeTimerRef.current) clearTimeout(finalizeTimerRef.current);
     stopSimulationBgm();
@@ -673,7 +674,7 @@ export default function AdminPage() {
     if (aiHeartbeatRef.current) clearInterval(aiHeartbeatRef.current);
     aiHeartbeatRef.current = window.setInterval(() => {
       updateRoom({ aiEvaluationHeartbeatAt: Date.now() }).catch(() => {});
-    }, 5000);
+    }, AI_HEARTBEAT_INTERVAL);
   }
 
   function stopAiHeartbeat() {
@@ -702,7 +703,7 @@ export default function AdminPage() {
   }, [authState.user?.uid, roomId]);
 
   useEffect(() => {
-    if (!roomId || !room || room.status !== STATUSES.SIMULATION || !room.simulationRunning || simulationRunning || intervalRef.current || room.simulationOwner === adminSessionIdRef.current) return undefined;
+    if (!roomId || !room || room.status !== STATUSES.SIMULATION || !room.simulationRunning || simulationRunning || simulationActiveRef.current || room.simulationOwner === adminSessionIdRef.current) return undefined;
 
     const heartbeatAge = Date.now() - Number(room.simulationHeartbeatAt || 0);
     const hasFreshOwner = room.simulationOwner && room.simulationOwner !== adminSessionIdRef.current && heartbeatAge < SIMULATION_LEASE_TIMEOUT;
@@ -752,7 +753,7 @@ export default function AdminPage() {
   }, [room?.resultFinalizeAt, room?.resultFinalizing, roomId]);
 
   useEffect(() => {
-    if (!roomId || simulationRunning || Number(room?.currentMonth || 0) < 24 || !room?.currentEvent || room.currentEventApplied !== false) return;
+    if (!roomId || simulationRunning || Number(room?.currentMonth || 0) < SIMULATION_MONTHS || !room?.currentEvent || room.currentEventApplied !== false) return;
     applySimulationEvent(room.currentEvent, Number(room.currentMonth || 0)).catch(() => {});
   }, [room?.currentEvent?.id, room?.currentEventApplied, room?.currentMonth, roomId, simulationRunning]);
 
@@ -869,14 +870,14 @@ export default function AdminPage() {
 
   async function finalizeResults() {
     if (!roomId) return;
-    if (Number(room?.currentMonth || 0) < 24) {
+    if (Number(room?.currentMonth || 0) < SIMULATION_MONTHS) {
       await updateRoom({
-        sysMessage: "24개월 경영 시뮬레이션이 끝난 뒤 최종 결과를 집계할 수 있습니다."
+        sysMessage: `${SIMULATION_MONTHS}개월 경영 시뮬레이션이 끝난 뒤 최종 결과를 집계할 수 있습니다.`
       });
       return;
     }
     stopSimulationBgm();
-    const resultFinalizeAt = Date.now() + 3000;
+    const resultFinalizeAt = Date.now() + RESULT_FINALIZE_DELAY;
     await updateRoom({
       resultFinalizing: true,
       resultFinalizeAt,
@@ -1127,100 +1128,147 @@ export default function AdminPage() {
       teamPatch[`teams.${key}.lastEventImpact`] = updated.lastEventImpact;
       teamPatch[`teams.${key}.assetHistory`] = [...history, { month, asset: updated.currentAsset }];
     }
-    const keepRunning = Boolean(applyRoom.simulationRunning) && month < 24;
+    const keepRunning = Boolean(applyRoom.simulationRunning) && month < SIMULATION_MONTHS;
     await updateRoom({
       ...teamPatch,
       currentEventApplied: true,
       simulationRunning: keepRunning,
       simulationOwner: keepRunning ? applyRoom.simulationOwner || adminSessionIdRef.current : null,
       simulationHeartbeatAt: keepRunning ? Date.now() : 0,
-      sysMessage: month >= 24 ? "24개월 경영 시뮬레이션이 종료되었습니다. 교사가 최종 결과 버튼을 누르면 결과가 공개됩니다." : `${month}개월 차 이벤트 자산 변동이 반영되었습니다.`
+      sysMessage: month >= SIMULATION_MONTHS ? `${SIMULATION_MONTHS}개월 경영 시뮬레이션이 종료되었습니다. 교사가 최종 결과 버튼을 누르면 결과가 공개됩니다.` : `${month}개월 차 이벤트 자산 변동이 반영되었습니다.`
     });
   }
 
-  async function runSimulation(startMonth = 0, speed = "normal") {
-    if (!roomId || intervalRef.current) return;
+  function clearSimulationTimers() {
+    if (simulationTimerRef.current) {
+      window.clearTimeout(simulationTimerRef.current);
+      simulationTimerRef.current = null;
+    }
+    if (applyTimerRef.current) {
+      window.clearTimeout(applyTimerRef.current);
+      applyTimerRef.current = null;
+    }
+  }
+
+  /** Stops driving the simulation from this tab (does not touch Firestore). */
+  function stopLocalSimulation({ keepPendingApply = false } = {}) {
+    if (simulationTimerRef.current) {
+      window.clearTimeout(simulationTimerRef.current);
+      simulationTimerRef.current = null;
+    }
+    if (!keepPendingApply && applyTimerRef.current) {
+      window.clearTimeout(applyTimerRef.current);
+      applyTimerRef.current = null;
+    }
+    simulationActiveRef.current = false;
+    setSimulationRunning(false);
+  }
+
+  /**
+   * Drives the simulation month by month with a recursive timeout: the next tick is scheduled only
+   * after the current one has finished its Firestore round-trip, so slow networks cannot make ticks
+   * overlap. `simulationActiveRef` guards against double starts; every timer lives in a ref so a
+   * pause or unmount cancels it.
+   */
+  async function runSimulation(startMonth = 0) {
+    if (!roomId || simulationActiveRef.current) return;
     if (!allTeamsEvaluated) {
       await updateRoom({
         sysMessage: "먼저 모든 팀의 AI 평가를 완료해야 경영 시뮬레이션을 시작할 수 있습니다."
       });
       return;
     }
+    simulationActiveRef.current = true;
     setSimulationRunning(true);
-    if (startMonth === 0) await initializeAssets();
-    if (startMonth > 0) {
-      await updateRoom({
-        simulationRunning: true,
-        simulationOwner: adminSessionIdRef.current,
-        simulationHeartbeatAt: Date.now(),
-        sysMessage: `${startMonth}개월 차부터 경영 시뮬레이션을 재개합니다.`
-      });
+    try {
+      if (startMonth === 0) {
+        await initializeAssets();
+      } else {
+        await updateRoom({
+          simulationRunning: true,
+          simulationOwner: adminSessionIdRef.current,
+          simulationHeartbeatAt: Date.now(),
+          sysMessage: `${startMonth}개월 차부터 경영 시뮬레이션을 재개합니다.`
+        });
+      }
+    } catch (err) {
+      stopLocalSimulation();
+      reportActionError(err, "시뮬레이션을 시작하지 못했습니다.");
+      return;
     }
-    let month = startMonth;
     playSimulationBgm();
+    let month = startMonth;
 
     async function advanceOneMonth() {
-      month += 1;
-      const freshSnap = await getDoc(currentRoomRef());
-      if (!freshSnap.exists()) return;
-      const freshRoom = freshSnap.data();
-      if (freshRoom.simulationOwner && freshRoom.simulationOwner !== adminSessionIdRef.current && freshRoom.simulationRunning) {
-        if (intervalRef.current) {
-          clearInterval(intervalRef.current);
-          intervalRef.current = null;
+      if (!simulationActiveRef.current) return;
+      const nextMonth = month + 1;
+      try {
+        const freshSnap = await getDoc(currentRoomRef());
+        if (!simulationActiveRef.current) return;
+        if (!freshSnap.exists()) {
+          stopLocalSimulation();
+          return;
         }
-        setSimulationRunning(false);
-        stopSimulationBgm();
-        return;
-      }
-
-      const event = drawEvent();
-      const nextEventHistory = [
-        ...(Array.isArray(freshRoom.eventHistory) ? freshRoom.eventHistory : []),
-        { month, event }
-      ];
-      const eventPreviewPatch = Object.fromEntries(
-        Object.keys(freshRoom.teams || {}).map((key) => [`teams.${key}.lastEventImpact`, null])
-      );
-      await updateRoom({
-        ...eventPreviewPatch,
-        currentMonth: month,
-        currentEvent: event,
-        currentEventApplied: false,
-        eventHistory: nextEventHistory,
-        currentDecision: null,
-        simulationRunning: month < 24,
-        simulationOwner: month < 24 ? adminSessionIdRef.current : null,
-        simulationHeartbeatAt: month < 24 ? Date.now() : 0,
-        status: STATUSES.SIMULATION,
-        resultFinalizing: false,
-        sysMessage: `${month}개월 차 이벤트: ${event.title}`
-      });
-
-      window.setTimeout(async () => {
-        await applySimulationEvent(event, month);
-      }, 1500);
-      if (month >= 24) {
-        if (intervalRef.current) {
-          clearInterval(intervalRef.current);
-          intervalRef.current = null;
+        const freshRoom = freshSnap.data();
+        const ownedElsewhere = freshRoom.simulationOwner && freshRoom.simulationOwner !== adminSessionIdRef.current && freshRoom.simulationRunning;
+        if (ownedElsewhere || !freshRoom.simulationRunning) {
+          // Another tab took over, or the simulation was paused from elsewhere.
+          stopLocalSimulation();
+          stopSimulationBgm();
+          return;
         }
-        setSimulationRunning(false);
-        stopSimulationBgm();
+
+        const event = drawEvent();
+        const nextEventHistory = [
+          ...(Array.isArray(freshRoom.eventHistory) ? freshRoom.eventHistory : []),
+          { month: nextMonth, event }
+        ];
+        const eventPreviewPatch = Object.fromEntries(
+          Object.keys(freshRoom.teams || {}).map((key) => [`teams.${key}.lastEventImpact`, null])
+        );
+        const isLastMonth = nextMonth >= SIMULATION_MONTHS;
+        await updateRoom({
+          ...eventPreviewPatch,
+          currentMonth: nextMonth,
+          currentEvent: event,
+          currentEventApplied: false,
+          eventHistory: nextEventHistory,
+          currentDecision: null,
+          simulationRunning: !isLastMonth,
+          simulationOwner: isLastMonth ? null : adminSessionIdRef.current,
+          simulationHeartbeatAt: isLastMonth ? 0 : Date.now(),
+          status: STATUSES.SIMULATION,
+          resultFinalizing: false,
+          sysMessage: `${nextMonth}개월 차 이벤트: ${event.title}`
+        });
+        month = nextMonth;
+
+        applyTimerRef.current = window.setTimeout(() => {
+          applyTimerRef.current = null;
+          applySimulationEvent(event, nextMonth).catch(() => {});
+        }, SIMULATION_EVENT_APPLY_DELAY);
+
+        if (isLastMonth) {
+          // Keep the pending apply timer so the final month's impact still lands.
+          stopLocalSimulation({ keepPendingApply: true });
+          stopSimulationBgm();
+          return;
+        }
+        simulationTimerRef.current = window.setTimeout(advanceOneMonth, SIMULATION_EVENT_DELAY);
+      } catch {
+        // Transient Firestore error: retry the same month on the next tick instead of dying silently.
+        if (simulationActiveRef.current) {
+          simulationTimerRef.current = window.setTimeout(advanceOneMonth, SIMULATION_EVENT_DELAY);
+        }
       }
     }
 
     await advanceOneMonth();
-    if (month >= 24) return;
-    intervalRef.current = setInterval(advanceOneMonth, SIMULATION_SPEEDS[speed]?.delay || SIMULATION_EVENT_DELAY);
   }
 
   function pauseSimulation() {
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
-    }
-    setSimulationRunning(false);
+    // The current event (if still unapplied) is applied on resume via resumeSimulation().
+    stopLocalSimulation();
     pauseSimulationBgm();
     if (roomId) {
       updateRoom({
@@ -1228,38 +1276,20 @@ export default function AdminPage() {
         simulationOwner: null,
         simulationHeartbeatAt: 0,
         sysMessage: "AI 경영 시뮬레이션을 일시정지했습니다."
-      });
+      }).catch((err) => reportActionError(err, "일시정지 상태를 저장하지 못했습니다."));
     }
   }
 
   async function resumeSimulation() {
-    if (room?.status !== STATUSES.SIMULATION || intervalRef.current) return;
-    const snapshot = await getDoc(currentRoomRef());
-    const savedRoom = snapshot.exists() ? snapshot.data() : room;
+    if (room?.status !== STATUSES.SIMULATION || simulationActiveRef.current) return;
+    const snapshot = await getDoc(currentRoomRef()).catch(() => null);
+    const savedRoom = snapshot?.exists() ? snapshot.data() : room;
     if (savedRoom.currentEvent && savedRoom.currentEventApplied === false) {
-      await applySimulationEvent(savedRoom.currentEvent, Number(savedRoom.currentMonth || 0));
+      await applySimulationEvent(savedRoom.currentEvent, Number(savedRoom.currentMonth || 0)).catch(() => {});
     }
-    runSimulation(room.currentMonth || 0);
-  }
-
-  async function continueAfterDecision() {
-    const teamPatch = {};
-    for (const [key, team] of Object.entries(teams)) {
-      const votes = Object.values(team.midDecision?.votes || {});
-      const aCount = votes.filter((vote) => vote === "A").length;
-      const bCount = votes.filter((vote) => vote === "B").length;
-      const choice = aCount >= bCount ? "A" : "B";
-      teamPatch[`teams.${key}.currentAsset`] = choice === "A" ? Number(team.currentAsset || 0) - 20000000 : Number(team.currentAsset || 0);
-      teamPatch[`teams.${key}.riskShield`] = choice === "A";
-      teamPatch[`teams.${key}.riskDouble`] = choice === "B";
-      teamPatch[`teams.${key}.midDecision`] = { ...(team.midDecision || {}), result: choice };
-    }
-    await updateRoom({
-      ...teamPatch,
-      currentDecision: null,
-      sysMessage: "긴급 의사결정 결과를 반영했습니다. 시뮬레이션을 계속합니다."
-    });
-    runSimulation(room.currentMonth || 12);
+    const savedMonth = Number(savedRoom.currentMonth || 0);
+    if (savedMonth >= SIMULATION_MONTHS) return;
+    await runSimulation(savedMonth);
   }
 
   async function resetRoom() {
@@ -1370,7 +1400,7 @@ export default function AdminPage() {
       </header>
 
       {room.sysMessage && <div className="event-notice ticker-pulse mt-4"><Megaphone size={24} /><div><p>진행 안내</p><strong>{room.sysMessage}</strong></div></div>}
-      {room.status === STATUSES.SIMULATION && !room.simulationRunning && Number(room.currentMonth || 0) < 24 && (
+      {room.status === STATUSES.SIMULATION && !room.simulationRunning && Number(room.currentMonth || 0) < SIMULATION_MONTHS && (
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4">
           <div>
             <b className="block text-amber-900">시뮬레이션이 {Number(room.currentMonth || 0)}개월 차에서 일시정지되어 있습니다.</b>
@@ -1426,7 +1456,7 @@ export default function AdminPage() {
           {room.status === STATUSES.RESULT && <button onClick={() => window.print()} className="print:hidden touch-button inline-flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-3 font-bold text-white"><FileDown size={18} /> 수업 결과 PDF 저장</button>}
         </aside>
         <div className="print-main space-y-5">
-          <TeamGrid roomStatus={room.status} teams={teams} students={students} onOpenStudentMenu={(uid, teamKey) => setStudentMenu({ uid, teamKey, mode: "assigned" })} onRenameTeam={renameTeam} onAddTeam={addTeam} onDeleteTeam={deleteTeam} onLockPlan={lockBusinessPlan} onOpenPlan={setPlanTeam} onOpenOpinion={setOpinionTeam} />
+          <TeamGrid teams={teams} students={students} onOpenStudentMenu={(uid, teamKey) => setStudentMenu({ uid, teamKey, mode: "assigned" })} onRenameTeam={renameTeam} onAddTeam={addTeam} onDeleteTeam={deleteTeam} onLockPlan={lockBusinessPlan} onOpenPlan={setPlanTeam} onOpenOpinion={setOpinionTeam} />
           {investmentChartVisible && <InvestmentChart teams={teams} />}
           {room.status === STATUSES.RESULT && (
             <div ref={resultBoardRef}>
@@ -1441,7 +1471,7 @@ export default function AdminPage() {
       {opinionTeam && <AiOpinionModal team={opinionTeam} onClose={() => setOpinionTeam(null)} />}
       {studentMenu && <StudentManageModal menu={studentMenu} students={students} teams={teams} onClose={() => setStudentMenu(null)} onAssign={assignStudentToTeam} onKick={removeStudent} onMove={moveStudentToTeam} onSetLeader={setLeader} />}
       {room.aiEvaluationStatus === "evaluating" && <AiEvaluationShowcase />}
-      {room.status === STATUSES.SIMULATION && room.currentEvent && Number(room.currentMonth || 0) < 24 && (
+      {room.status === STATUSES.SIMULATION && room.currentEvent && Number(room.currentMonth || 0) < SIMULATION_MONTHS && (
         <AdminEventShowcase
           event={room.currentEvent}
           month={room.currentMonth || 0}
@@ -1462,8 +1492,7 @@ function getStudentOrigin(localNetworkHost) {
   return origin;
 }
 
-function TeamGrid({ roomStatus, teams, students, onOpenStudentMenu, onRenameTeam, onAddTeam, onDeleteTeam, onLockPlan, onOpenPlan, onOpenOpinion }) {
-  const maxInvestment = Math.max(1, ...Object.values(teams).map((team) => Number(team.investmentsReceived || 0)));
+function TeamGrid({ teams, students, onOpenStudentMenu, onRenameTeam, onAddTeam, onDeleteTeam, onLockPlan, onOpenPlan, onOpenOpinion }) {
   return (
     <section>
       <div className="mb-3 flex items-center justify-between gap-3">
@@ -1527,7 +1556,7 @@ function TeamGrid({ roomStatus, teams, students, onOpenStudentMenu, onRenameTeam
                   <button type="button" disabled={!team.idea || team.ideaSubmitted === false} onClick={() => onOpenPlan({ key, ...team })} className="touch-button rounded-lg bg-indigo-600 px-3 py-2 text-sm font-black text-white disabled:bg-slate-200 disabled:text-slate-400">{team.idea && team.ideaSubmitted !== false ? "사업계획 등록 완료!" : "사업계획서 미등록"}</button>
                   <button type="button" disabled={!team.idea || team.ideaSubmitted === false || team.ideaLocked} onClick={() => onLockPlan(key)} className="touch-button rounded-lg bg-slate-900 px-3 py-2 text-sm font-black text-white disabled:bg-slate-200 disabled:text-slate-400">{team.ideaLocked ? "확정됨" : "확정"}</button>
                 </div>
-                <InvestmentGauge team={team} maxInvestment={maxInvestment} />
+                <InvestmentGauge team={team} />
                 <AiEvaluationSummary team={team} onOpenOpinion={() => onOpenOpinion({ key, ...team })} />
               </div>
             </section>
@@ -1554,59 +1583,6 @@ function PhaseRail({ currentStatus, onPhaseClick }) {
   );
 }
 
-function ResultFinalizingShowcase() {
-  return createPortal((
-    <div className="event-showcase ai-evaluation-showcase result-finalizing-showcase">
-      <div className="event-spark event-spark-one" />
-      <div className="event-spark event-spark-two" />
-      <div className="event-showcase-stage ai-evaluation-stage">
-        <div className="event-showcase-copy event-showcase-copy-active">
-          <p>최종 결과</p>
-          <h2>최종결과 집계중...</h2>
-          <span>잠시 후 최종 순위와 사업 리포트가 공개됩니다</span>
-        </div>
-        <div className="ai-evaluation-loader" aria-hidden="true">
-          <span />
-          <span />
-          <span />
-        </div>
-      </div>
-    </div>
-  ), document.body);
-}
-
-function FanfareOnResult({ status }) {
-  const previous = useRef(status);
-  useEffect(() => {
-    if (previous.current !== STATUSES.RESULT && status === STATUSES.RESULT) playFanfare();
-    previous.current = status;
-  }, [status]);
-  return null;
-}
-
-function ResultFireworks({ status }) {
-  const previous = useRef(status);
-  const [visible, setVisible] = useState(false);
-
-  useEffect(() => {
-    if (previous.current !== STATUSES.RESULT && status === STATUSES.RESULT) {
-      setVisible(true);
-      const timer = window.setTimeout(() => setVisible(false), 10000);
-      previous.current = status;
-      return () => window.clearTimeout(timer);
-    }
-    previous.current = status;
-    return undefined;
-  }, [status]);
-
-  if (!visible) return null;
-  return createPortal((
-    <div className="result-fireworks" aria-hidden="true">
-      {Array.from({ length: 22 }, (_, index) => <span key={index} />)}
-    </div>
-  ), document.body);
-}
-
 function AdminEventShowcase({ event, month, running, onPause, onResume }) {
   const factor = BUSINESS_FACTORS.find((item) => item.id === event.factor);
   useEffect(() => {
@@ -1630,98 +1606,6 @@ function AdminEventShowcase({ event, month, running, onPause, onResume }) {
           <span>{event.factor} · {factor?.name || "비즈니스 팩터"}</span>
         </div>
         <EventCardVisual key={`card-${month}-${event.id}`} event={event} />
-      </div>
-    </div>
-  ), document.body);
-}
-
-function AiEvaluationShowcase() {
-  return createPortal((
-    <div className="event-showcase ai-evaluation-showcase">
-      <div className="event-spark event-spark-one" />
-      <div className="event-spark event-spark-two" />
-      <div className="event-showcase-stage ai-evaluation-stage">
-        <div className="event-showcase-copy event-showcase-copy-active">
-          <p>사업계획 AI 평가</p>
-          <h2>지금 모두의 사업계획을<br />비즈니스 전문 AI가 평가중입니다...</h2>
-          <span>잠시 후 팀별 평가 결과가 공개됩니다</span>
-        </div>
-        <div className="ai-evaluation-loader" aria-hidden="true">
-          <span />
-          <span />
-          <span />
-        </div>
-      </div>
-    </div>
-  ), document.body);
-}
-
-function AdminEventReviewShowcase({ entries }) {
-  const [open, setOpen] = useState(true);
-  const [index, setIndex] = useState(Math.max(0, entries.length - 1));
-  const entry = entries[index];
-  const factor = BUSINESS_FACTORS.find((item) => item.id === entry?.event?.factor);
-
-  useEffect(() => {
-    setIndex(Math.max(0, entries.length - 1));
-  }, [entries.length]);
-
-  if (!open || !entry?.event) return null;
-
-  function move(direction) {
-    setIndex((current) => Math.max(0, Math.min(entries.length - 1, current + direction)));
-  }
-
-  return createPortal((
-    <div className="event-showcase event-showcase-admin event-review-showcase">
-      <button type="button" onClick={() => setOpen(false)} className="event-review-close">리뷰 닫기</button>
-      <button type="button" onClick={() => move(-1)} disabled={index <= 0} className="event-review-arrow event-review-arrow-left" title="이전 이벤트">
-        <ChevronLeft size={42} />
-      </button>
-      <button type="button" onClick={() => move(1)} disabled={index >= entries.length - 1} className="event-review-arrow event-review-arrow-right" title="다음 이벤트">
-        <ChevronRight size={42} />
-      </button>
-      <div className="event-spark event-spark-one" />
-      <div className="event-spark event-spark-two" />
-      <div className="event-showcase-stage">
-        <div key={`review-copy-${index}-${entry.event.id}`} className="event-showcase-copy event-showcase-copy-active">
-          <p>{entry.month}개월 차 이벤트 리뷰</p>
-          <h2>{entry.event.title}</h2>
-          <span>{entry.event.factor} · {factor?.name || "비즈니스 팩터"}</span>
-        </div>
-        <EventCardVisual key={`review-card-${index}-${entry.event.id}`} event={entry.event} />
-      </div>
-    </div>
-  ), document.body);
-}
-
-function EventCardVisual({ event, children }) {
-  const image = getEventImage(event);
-  return (
-    <div className="event-card-visual">
-      {image ? (
-        <img src={image} alt={event.title} />
-      ) : (
-        <div className="event-card-fallback">
-          <strong>{event.id}</strong>
-          <span>{event.title}</span>
-        </div>
-      )}
-      {children}
-    </div>
-  );
-}
-
-function getEventImage(event) {
-  return eventCardImages[event?.id] || "";
-}
-
-function EventImageModal({ event, onClose }) {
-  return createPortal((
-    <div className="fixed inset-0 z-[9999] grid place-items-center bg-slate-950/80 p-5" onClick={onClose}>
-      <div className="w-full max-w-md" onClick={(clickEvent) => clickEvent.stopPropagation()}>
-        <img src={getEventImage(event)} alt={event.title} className="mx-auto max-h-[86vh] rounded-lg object-contain shadow-lift" />
-        <button type="button" onClick={onClose} className="touch-button mt-4 w-full rounded-lg bg-white px-4 py-3 font-black text-slate-900">닫기</button>
       </div>
     </div>
   ), document.body);
@@ -1945,7 +1829,7 @@ function ResultBoard({ rankedTeams, teams, students, room }) {
         </div>
         <div className="report-kpis">
           <div>
-            <p>24개월 후 학급 총 자산</p>
+            <p>{SIMULATION_MONTHS}개월 후 학급 총 자산</p>
             <strong>{formatWon(totalFinal)}</strong>
           </div>
           <div className={classRate >= 0 ? "report-kpi-up" : "report-kpi-down"}>
@@ -2063,25 +1947,6 @@ function ResultBoard({ rankedTeams, teams, students, room }) {
   );
 }
 
-function AssetChangeSummary({ team, featured = false, className = "" }) {
-  const { initial, final, delta, rate, positive } = getAssetChange(team);
-  const tone = positive ? "asset-change-up" : "asset-change-down";
-  return (
-    <div className={`asset-change-summary ${tone} ${featured ? "asset-change-summary-featured" : ""} ${className}`}>
-      <div>
-        <p>최초 총 자산</p>
-        <strong>{formatWon(initial)}</strong>
-      </div>
-      <div className="asset-change-arrow" aria-hidden="true">{positive ? "▶" : "▶"}</div>
-      <div className="asset-change-final">
-        <p>최종 총 자산</p>
-        <strong>{formatWon(final)}</strong>
-        <span className="asset-change-delta">{positive ? "▲ +" : "▼ "}{formatWon(delta)} · {positive ? "+" : ""}{rate.toFixed(1)}%</span>
-      </div>
-    </div>
-  );
-}
-
 function AiGradeTally({ team }) {
   if (!team?.aiEvaluation) return null;
   const counts = countAiGrades(team);
@@ -2092,67 +1957,6 @@ function AiGradeTally({ team }) {
       <span className="ai-grade-tally-weak">취약 {counts.취약}</span>
     </div>
   );
-}
-
-function AssetTrendChart({ team, className = "" }) {
-  const history = normalizeAssetHistory(team);
-  const width = 520;
-  const height = 150;
-  const padding = 18;
-  const values = history.map((point) => point.asset);
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const range = Math.max(1, max - min);
-  const points = history.map((point, index) => {
-    const x = padding + (index / Math.max(1, history.length - 1)) * (width - padding * 2);
-    const y = height - padding - ((point.asset - min) / range) * (height - padding * 2);
-    return `${x},${y}`;
-  }).join(" ");
-  const last = history[history.length - 1];
-
-  return (
-    <div className={`rounded-lg bg-white p-3 ring-1 ring-slate-200 ${className}`}>
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <p className="text-xs font-black text-slate-500">24개월 총 자산 변동 추이</p>
-        <p className="text-xs font-black text-indigo-700">{last?.month || 0}개월 · {formatWon(last?.asset || 0)}</p>
-      </div>
-      <svg viewBox={`0 0 ${width} ${height}`} className="h-36 w-full overflow-visible">
-        <defs>
-          <linearGradient id={`line-${team.teamId || team.key}`} x1="0" x2="1" y1="0" y2="0">
-            <stop offset="0%" stopColor="#4f46e5" />
-            <stop offset="50%" stopColor="#06b6d4" />
-            <stop offset="100%" stopColor="#10b981" />
-          </linearGradient>
-        </defs>
-        {[0, 1, 2].map((line) => (
-          <line key={line} x1={padding} x2={width - padding} y1={padding + line * 52} y2={padding + line * 52} stroke="#e2e8f0" strokeWidth="1" />
-        ))}
-        <polyline points={points} fill="none" stroke={`url(#line-${team.teamId || team.key})`} strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" />
-        {history.map((point, index) => {
-          if (index !== 0 && index !== history.length - 1 && point.month % 6 !== 0) return null;
-          const [x, y] = points.split(" ")[index].split(",").map(Number);
-          return <circle key={point.month} cx={x} cy={y} r="4" fill="#0f172a" />;
-        })}
-      </svg>
-    </div>
-  );
-}
-
-function normalizeAssetHistory(team) {
-  const history = Array.isArray(team.assetHistory) && team.assetHistory.length > 1
-    ? team.assetHistory
-    : [
-        { month: 0, asset: getTeamStartingCapital(team) },
-        { month: 24, asset: Number(team.currentAsset || getTeamStartingCapital(team)) }
-      ];
-  const sampled = history.filter((point, index) => {
-    const month = Number(point.month || 0);
-    return month % 2 === 0 || index === history.length - 1;
-  });
-  return sampled.map((point) => ({
-    month: Number(point.month || 0),
-    asset: Number(point.asset || 0)
-  }));
 }
 
 function QrModal({ value, roomId, onClose }) {
@@ -2177,65 +1981,4 @@ function makeAiEvaluationMessage(evaluations = {}) {
     return `AI 평가 완료: 렛서 AI 성공 ${aiSuccessCount}팀, 기본 평가 적용 ${fallbackCount}팀. 평가의견에서 실패 사유를 확인하세요.`;
   }
   return `AI 사업계획서 평가가 완료되었습니다. 팀 패널에서 14개 지표와 1~2줄 종합의견을 확인하세요.`;
-}
-
-function gradeClassName(grade) {
-  if (grade === "양호") return "bg-emerald-100 text-emerald-800";
-  if (grade === "취약") return "bg-rose-100 text-rose-800";
-  return "bg-amber-100 text-amber-800";
-}
-
-function playFanfare() {
-  try {
-    const AudioContext = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContext) return;
-    const context = new AudioContext();
-    const now = context.currentTime;
-    const notes = [523.25, 659.25, 783.99, 1046.5, 783.99, 1046.5, 1318.51];
-    notes.forEach((frequency, index) => {
-      const oscillator = context.createOscillator();
-      const gain = context.createGain();
-      oscillator.type = index % 2 === 0 ? "triangle" : "sine";
-      oscillator.frequency.value = frequency;
-      gain.gain.setValueAtTime(0.0001, now + index * 0.12);
-      gain.gain.exponentialRampToValueAtTime(0.22, now + index * 0.12 + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + index * 0.12 + 0.28);
-      oscillator.connect(gain);
-      gain.connect(context.destination);
-      oscillator.start(now + index * 0.12);
-      oscillator.stop(now + index * 0.12 + 0.3);
-    });
-    window.setTimeout(() => context.close().catch(() => {}), 1600);
-  } catch {
-    // Browser autoplay policies can block audio until the user interacts.
-  }
-}
-
-function playWhoosh() {
-  try {
-    const AudioContext = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContext) return;
-    const context = new AudioContext();
-    const now = context.currentTime;
-    const oscillator = context.createOscillator();
-    const gain = context.createGain();
-    const filter = context.createBiquadFilter();
-    oscillator.type = "sawtooth";
-    oscillator.frequency.setValueAtTime(900, now);
-    oscillator.frequency.exponentialRampToValueAtTime(140, now + 0.32);
-    filter.type = "lowpass";
-    filter.frequency.setValueAtTime(2600, now);
-    filter.frequency.exponentialRampToValueAtTime(360, now + 0.32);
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(0.18, now + 0.03);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.36);
-    oscillator.connect(filter);
-    filter.connect(gain);
-    gain.connect(context.destination);
-    oscillator.start(now);
-    oscillator.stop(now + 0.38);
-    window.setTimeout(() => context.close().catch(() => {}), 700);
-  } catch {
-    // Browser autoplay policies can block audio until the user interacts.
-  }
 }

@@ -1,4 +1,4 @@
-﻿export const STATUSES = {
+export const STATUSES = {
   WAITING: "WAITING",
   C_LEVEL: "C_LEVEL",
   CARD_SELECT: "CARD_SELECT",
@@ -93,19 +93,6 @@ export const C_LEVEL_QUESTIONS = [
     { text: "어떤 문화가 유행할지 감으로 안다", scores: [0, 0, 0, 1, 3, 1, 0] },
     { text: "통계와 수치로 성장 산업을 찾아낸다", scores: [0, 1, 3, 0, 0, 2, 1] }
   ] }
-];
-
-export const ECONOMIC_EVENTS = [
-  { id: "ev_01", title: "대세 유튜버의 내돈내산 저격 리뷰!", description: "구독자 500만 유튜버가 제품을 극찬하여 주문이 폭주합니다!", multiplier: 1.25, type: "POSITIVE" },
-  { id: "ev_02", title: "악플러들의 별점 테러 사건", description: "악의적인 별점 테러로 인해 일시적으로 매출과 브랜드 가치가 깎입니다.", multiplier: 0.9, type: "NEGATIVE" },
-  { id: "ev_03", title: "아이돌 멤버의 릴스 챌린지 떡상", description: "대세 아이돌이 우리 브랜드 제품을 착용한 영상이 바이럴되며 품절 대란이 일어납니다.", multiplier: 1.2, type: "POSITIVE" },
-  { id: "ev_04", title: "메인 서버 고양이 액체괴물 투하 사고", description: "사무실 고양이가 메인 컴퓨터에 슬라임을 쏟아 복구 비용이 지출됩니다.", multiplier: 0.85, type: "NEGATIVE" },
-  { id: "ev_05", title: "일론 머스크의 '개쩐다' 트윗 리트윗", description: "머스크가 우리 팀의 핵심 기술을 SNS에 언급하며 가상 투자금이 폭발합니다.", multiplier: 1.3, type: "POSITIVE" },
-  { id: "ev_06", title: "배터리 핵심 원자재 리튬 가격 폭등", description: "원자재 공급망 위기로 부품 제조 단가가 상승해 자산이 차감됩니다.", multiplier: 0.88, type: "NEGATIVE" },
-  { id: "ev_07", title: "제로 칼로리 마라탕 대유행 트렌드", description: "헬스케어 및 저당 트렌드가 대히트하여 관련 기술 기업들의 가치가 급상승합니다.", multiplier: 1.15, type: "POSITIVE" },
-  { id: "ev_08", title: "중앙은행 기습 금리 인상 폭탄", description: "시중 금리가 크게 올라 스타트업 투자금이 은행으로 회수되며 전체 가치가 하락합니다.", multiplier: 0.91, type: "NEGATIVE" },
-  { id: "ev_09", title: "정부 주관 'AX 미래 혁신 기업' 선정", description: "정부로부터 기술력을 인정받아 조건 없는 무상 고액 보조금을 획득합니다.", multiplier: 1.25, type: "POSITIVE" },
-  { id: "ev_10", title: "팀장의 중학교 졸업사진 밈(Meme) 유출", description: "팀장의 코믹한 과거 사진이 유출되어 회사의 주가가 미세하게 출렁입니다.", multiplier: 0.98, type: "NEUTRAL" }
 ];
 
 export const BUSINESS_FACTORS = [

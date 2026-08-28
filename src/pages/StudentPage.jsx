@@ -19,6 +19,10 @@ import {
 import { INVESTMENT_BUDGET, INVESTMENT_STEP, TEAM_BASE_ASSET, formatWon, getAssetChange, getStudentsByTeam, getTeamBaseAsset, getTeamEntries, getTeamStartingCapital, makeStudent, normalizeTeamName, rankTeams, sumInvestments } from "../lib/game.js";
 import { studentDocRef, useRoom } from "../hooks/useRoom.js";
 import { updateOwnStudent, updateOwnTeam } from "../lib/roomStore.js";
+import { getEventImage, getTechCardImage, getTrendCardImage } from "../lib/assets.js";
+import { playWhoosh } from "../lib/audio.js";
+import { AiEvaluationShowcase, EventCardVisual, FanfareOnResult, ResultFinalizingShowcase, ResultFireworks } from "../components/shared/Effects.jsx";
+import { AssetChangeSummary, AssetTrendChart, gradeClassName } from "../components/shared/AssetCharts.jsx";
 
 const BUDGET = INVESTMENT_BUDGET;
 
@@ -51,17 +55,6 @@ function ErrorBanner({ message, onDismiss }) {
     </div>
   );
 }
-const trendCardImages = Object.entries(import.meta.glob("../images/B*.png", { eager: true, import: "default" }))
-  .sort(([a], [b]) => a.localeCompare(b))
-  .map(([, image]) => image);
-const techCardImages = Object.entries(import.meta.glob("../images/A*.png", { eager: true, import: "default" }))
-  .sort(([a], [b]) => a.localeCompare(b))
-  .map(([, image]) => image);
-const eventCardImages = Object.fromEntries(
-  Object.entries(import.meta.glob("../images/E*.png", { eager: true, import: "default" }))
-    .map(([path, image]) => [path.match(/E\d{2}/)?.[0], image])
-    .filter(([id]) => id)
-);
 
 export default function StudentPage() {
   const { roomId } = useParams();
@@ -162,7 +155,7 @@ export default function StudentPage() {
   return (
     <MobileFrame>
       <PhaseTransition status={room.status} />
-      {room.resultFinalizing && <ResultFinalizingShowcase />}
+      {room.resultFinalizing && <ResultFinalizingShowcase variant="phase" />}
       <FanfareOnResult status={room.status} />
       <ResultFireworks status={room.status} />
       <StudentHeader room={room} uid={authUid} student={student} />
@@ -173,7 +166,7 @@ export default function StudentPage() {
       {room.status === STATUSES.IDEATION && <Ideation room={room} uid={authUid} student={student} />}
       {room.status === STATUSES.AI_EVALUATION && <AiEvaluation room={room} student={student} />}
       {room.status === STATUSES.INVESTMENT && <Investment room={room} uid={authUid} student={student} />}
-      {room.status === STATUSES.SIMULATION && <Simulation room={room} uid={authUid} student={student} />}
+      {room.status === STATUSES.SIMULATION && <Simulation room={room} student={student} />}
       {room.status === STATUSES.RESULT && <Result room={room} />}
     </MobileFrame>
   );
@@ -517,7 +510,6 @@ function CardSelect({ room, uid, student }) {
 
   const cards = step === "trend" ? TREND_CARDS : TECH_CARDS;
   const selectedCard = step === "trend" ? selectedTrend : selectedTech;
-  const imageList = step === "trend" ? trendCardImages : techCardImages;
   const complete = bothSaved && !editing;
 
   return (
@@ -553,7 +545,7 @@ function CardSelect({ room, uid, student }) {
           <CardSheetButton
             key={card.id}
             card={card}
-            image={imageList[card.index]}
+            image={step === "trend" ? getTrendCardImage(card) : getTechCardImage(card)}
             selected={selectedCard?.id === card.id}
             disabled={!canSelect}
             onClick={() => (step === "trend" ? setSelectedTrend(card) : setSelectedTech(card))}
@@ -579,57 +571,13 @@ function CardSheetButton({ card, image, selected, disabled, onClick }) {
     </button>
   );
 }
-
-function ResultFinalizingShowcase() {
-  return (
-    <div className="phase-overlay result-finalizing-overlay">
-      <div className="phase-burst result-finalizing-burst">
-        <p className="text-sm font-black text-amber-200">최종 결과</p>
-        <h2 className="mt-3 break-keep text-4xl font-black text-white">최종결과 집계중...</h2>
-        <p className="mt-4 text-sm font-bold text-indigo-100">잠시 후 최종 순위와 사업 리포트가 공개됩니다.</p>
-      </div>
-    </div>
-  );
-}
-
-function FanfareOnResult({ status }) {
-  const previous = useRef(status);
-  useEffect(() => {
-    if (previous.current !== STATUSES.RESULT && status === STATUSES.RESULT) playFanfare();
-    previous.current = status;
-  }, [status]);
-  return null;
-}
-
-function ResultFireworks({ status }) {
-  const previous = useRef(status);
-  const [visible, setVisible] = useState(false);
-
-  useEffect(() => {
-    if (previous.current !== STATUSES.RESULT && status === STATUSES.RESULT) {
-      setVisible(true);
-      const timer = window.setTimeout(() => setVisible(false), 10000);
-      previous.current = status;
-      return () => window.clearTimeout(timer);
-    }
-    previous.current = status;
-    return undefined;
-  }, [status]);
-
-  if (!visible) return null;
-  return (
-    <div className="result-fireworks" aria-hidden="true">
-      {Array.from({ length: 22 }, (_, index) => <span key={index} />)}
-    </div>
-  );
-}
 function SelectedCardsStrip({ team }) {
   const trend = team?.trendCard;
   const tech = team?.techCard;
   if (!trend && !tech) return null;
   const items = [
-    { label: "트렌드", card: trend, image: trend ? trendCardImages[trend.index] : null },
-    { label: "기술카드", card: tech, image: tech ? techCardImages[tech.index] : null }
+    { label: "트렌드", card: trend, image: getTrendCardImage(trend) },
+    { label: "기술카드", card: tech, image: getTechCardImage(tech) }
   ];
   return (
     <div className="selected-cards-strip mt-3">
@@ -970,30 +918,8 @@ function InvestmentTeamDetails({ team }) {
     </div>
   );
 }
-
-function AiEvaluationShowcase() {
-  return (
-    <div className="event-showcase ai-evaluation-showcase">
-      <div className="event-spark event-spark-one" />
-      <div className="event-spark event-spark-two" />
-      <div className="event-showcase-stage ai-evaluation-stage">
-        <div className="event-showcase-copy event-showcase-copy-active">
-          <p>사업계획 AI 평가</p>
-          <h2>지금 모두의 사업계획을<br />비즈니스 전문 AI가 평가중입니다...</h2>
-          <span>잠시 후 팀별 평가 결과가 공개됩니다</span>
-        </div>
-        <div className="ai-evaluation-loader" aria-hidden="true">
-          <span />
-          <span />
-          <span />
-        </div>
-      </div>
-    </div>
-  );
-}
-function Simulation({ room, uid, student }) {
+function Simulation({ room, student }) {
   const myTeam = room.teams?.[student.team];
-  if (room.currentDecision) return <DecisionVote room={room} uid={uid} student={student} team={myTeam} />;
   const displayAsset = getDisplayAsset(myTeam, room.currentMonth || 0);
   const assetNegative = displayAsset < 0;
   const investment = Number(myTeam?.investmentsReceived || 0);
@@ -1134,33 +1060,7 @@ function StudentEventShowcase({ event, impact, month, team }) {
       </div>
     </div>
   );
-}
-function DecisionVote({ room, uid, student, team }) {
-  const currentVote = team?.midDecision?.votes?.[uid];
-  async function vote(choice) {
-    if (currentVote === choice) return;
-    try {
-      await updateOwnTeam(room.ownerUid, room.roomId, student.team, { [`midDecision.votes.${uid}`]: choice });
-    } catch {
-      // The vote UI reflects the room snapshot; a failed write simply leaves the previous vote visible.
-    }
-  }
-  return (
-    <section>
-      <div className="event-card event-card-warning">
-        <p className="text-sm font-black uppercase tracking-wide">12개월 차 긴급 의사결정</p>
-        <h2 className="mt-2 text-2xl font-black">{room.currentDecision.title}</h2>
-        <p className="mt-2 text-base leading-7">{room.currentDecision.description}</p>
-      </div>
-      <div className="mt-4 grid gap-3">
-        <button onClick={() => vote("A")} className={`touch-button rounded-lg p-4 text-left font-black shadow-lift ${currentVote === "A" ? "bg-indigo-600 text-white" : "bg-white text-slate-900"}`}>A. {room.currentDecision.optionA}</button>
-        <button onClick={() => vote("B")} className={`touch-button rounded-lg p-4 text-left font-black shadow-lift ${currentVote === "B" ? "bg-indigo-600 text-white" : "bg-white text-slate-900"}`}>B. {room.currentDecision.optionB}</button>
-      </div>
-      <p className="mt-3 text-center text-sm font-bold text-slate-500">{currentVote ? "투표 완료. 교사가 다음 진행을 시작합니다." : "팀원들과 상의한 뒤 선택하세요."}</p>
-    </section>
-  );
-}
-function Result({ room }) {
+}function Result({ room }) {
   const [selected, setSelected] = useState(null);
   const rankedTeams = useMemo(() => rankTeams(room.teams), [room.teams]);
   const winner = rankedTeams[0];
@@ -1173,7 +1073,7 @@ function Result({ room }) {
             <p className="text-sm font-black text-amber-700">1위 팀</p>
             <h3 className="mt-1 text-4xl font-black text-slate-950">{winner.teamName}</h3>
             <AssetChangeSummary team={winner} featured className="mt-3" />
-            <AssetTrendChart team={winner} className="mt-4" />
+            <AssetTrendChart team={winner} size="compact" className="mt-4" />
           </div>
         </button>
       )}
@@ -1239,213 +1139,14 @@ function AssetBars({ teams, currentMonth = 0 }) {
   );
 }
 
-function AssetChangeSummary({ team, featured = false, className = "" }) {
-  const { initial, final, delta, rate, positive } = getAssetChange(team);
-  const tone = positive ? "asset-change-up" : "asset-change-down";
-  return (
-    <div className={`asset-change-summary ${tone} ${featured ? "asset-change-summary-featured" : ""} ${className}`}>
-      <div>
-        <p>최초 총 자산</p>
-        <strong>{formatWon(initial)}</strong>
-      </div>
-      <div className="asset-change-arrow" aria-hidden="true">▶</div>
-      <div className="asset-change-final">
-        <p>최종 총 자산</p>
-        <strong>{formatWon(final)}</strong>
-        <span className="asset-change-delta">{positive ? "▲ +" : "▼ "}{formatWon(delta)} · {positive ? "+" : ""}{rate.toFixed(1)}%</span>
-      </div>
-    </div>
-  );
-}
-
 function CanvasBlock({ title, children }) {
   return <section className="mt-4 rounded-lg bg-white p-4 shadow-lift"><h3 className="mb-3 flex items-center gap-2 font-black"><Lightbulb size={18} /> {title}</h3>{children}</section>;
-}
-
-function ChipGroup({ options, value, allowCustom = false, disabled = false, onChange }) {
-  const [customOpen, setCustomOpen] = useState(false);
-  const [customValue, setCustomValue] = useState(options.includes(value) ? "" : value || "");
-  const [customConfirmed, setCustomConfirmed] = useState(false);
-
-  function saveCustom() {
-    if (disabled) return;
-    const next = customValue.trim();
-    if (next) {
-      onChange(next);
-      setCustomConfirmed(true);
-    }
-  }
-
-  return (
-    <div>
-      <div className="flex flex-wrap gap-2">
-        {options.map((option) => (
-          <button key={option} type="button" disabled={disabled} onClick={() => onChange(option)} className={`touch-button rounded-full px-4 py-2 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-60 ${value === option ? "bg-indigo-600 text-white" : "bg-slate-100 text-slate-700"}`}>
-            {value === option && <Check size={14} className="mr-1 inline" />}
-            {option}
-          </button>
-        ))}
-        {allowCustom && (
-          <button type="button" disabled={disabled} onClick={() => setCustomOpen(!customOpen)} className={`touch-button rounded-full px-4 py-2 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-60 ${customOpen ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-700"}`}>직접 입력</button>
-        )}
-      </div>
-      {allowCustom && customOpen && (
-        <div className="mt-3 flex gap-2">
-          <input disabled={disabled || customConfirmed} value={customValue} onChange={(event) => { setCustomValue(event.target.value); setCustomConfirmed(false); }} onKeyDown={(event) => event.key === "Enter" && saveCustom()} className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-3 outline-none focus:border-indigo-500 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" placeholder="직접 입력" />
-          <button type="button" disabled={disabled || customConfirmed} onClick={saveCustom} className="touch-button rounded-lg bg-indigo-600 px-4 py-3 text-sm font-bold text-white disabled:bg-slate-200 disabled:text-slate-400">{customConfirmed ? "등록됨" : "확인"}</button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function AssetTrendChart({ team, className = "" }) {
-  const history = normalizeAssetHistory(team);
-  const width = 360;
-  const height = 140;
-  const padding = 16;
-  const values = history.map((point) => point.asset);
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const range = Math.max(1, max - min);
-  const points = history.map((point, index) => {
-    const x = padding + (index / Math.max(1, history.length - 1)) * (width - padding * 2);
-    const y = height - padding - ((point.asset - min) / range) * (height - padding * 2);
-    return `${x},${y}`;
-  });
-  const last = history[history.length - 1];
-
-  return (
-    <div className={`rounded-lg bg-white p-3 ring-1 ring-slate-200 ${className}`}>
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <p className="text-xs font-black text-slate-500">24개월 자산 추이</p>
-        <p className="text-xs font-black text-indigo-700">{last?.month || 0}개월 · {formatWon(last?.asset || 0)}</p>
-      </div>
-      <svg viewBox={`0 0 ${width} ${height}`} className="h-32 w-full overflow-visible">
-        <defs>
-          <linearGradient id={`student-line-${team.teamId || team.key}`} x1="0" x2="1" y1="0" y2="0">
-            <stop offset="0%" stopColor="#4f46e5" />
-            <stop offset="50%" stopColor="#06b6d4" />
-            <stop offset="100%" stopColor="#10b981" />
-          </linearGradient>
-        </defs>
-        {[0, 1, 2].map((line) => (
-          <line key={line} x1={padding} x2={width - padding} y1={padding + line * 48} y2={padding + line * 48} stroke="#e2e8f0" strokeWidth="1" />
-        ))}
-        <polyline points={points.join(" ")} fill="none" stroke={`url(#student-line-${team.teamId || team.key})`} strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" />
-        {history.map((point, index) => {
-          if (index !== 0 && index !== history.length - 1 && point.month % 6 !== 0) return null;
-          const [x, y] = points[index].split(",").map(Number);
-          return <circle key={point.month} cx={x} cy={y} r="4" fill="#0f172a" />;
-        })}
-      </svg>
-    </div>
-  );
-}
-
-function normalizeAssetHistory(team) {
-  const history = Array.isArray(team.assetHistory) && team.assetHistory.length > 1
-    ? team.assetHistory
-    : [
-        { month: 0, asset: getTeamStartingCapital(team) },
-        { month: 24, asset: Number(team.currentAsset || getTeamStartingCapital(team)) }
-      ];
-  const sampled = history.filter((point, index) => {
-    const month = Number(point.month || 0);
-    return month % 2 === 0 || index === history.length - 1;
-  });
-  return sampled.map((point) => ({
-    month: Number(point.month || 0),
-    asset: Number(point.asset || 0)
-  }));
 }
 
 function getDisplayAsset(team, currentMonth) {
   if (!team) return 0;
   if (currentMonth > 0 || team.lastEventImpact) return Number(team.currentAsset || 0);
   return getTeamStartingCapital(team);
-}
-
-function EventCardVisual({ event, children }) {
-  const image = getEventImage(event);
-  return (
-    <div className="event-card-visual">
-      {image ? (
-        <img src={image} alt={event.title} />
-      ) : (
-        <div className="event-card-fallback">
-          <strong>{event.id}</strong>
-          <span>{event.title}</span>
-        </div>
-      )}
-      {children}
-    </div>
-  );
-}
-
-function getEventImage(event) {
-  return eventCardImages[event?.id] || "";
-}
-
-function gradeClassName(grade) {
-  if (grade === "양호") return "bg-emerald-100 text-emerald-800";
-  if (grade === "취약") return "bg-rose-100 text-rose-800";
-  return "bg-amber-100 text-amber-800";
-}
-
-function playFanfare() {
-  try {
-    const AudioContext = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContext) return;
-    const context = new AudioContext();
-    const now = context.currentTime;
-    const notes = [523.25, 659.25, 783.99, 1046.5, 783.99, 1046.5, 1318.51];
-    notes.forEach((frequency, index) => {
-      const oscillator = context.createOscillator();
-      const gain = context.createGain();
-      oscillator.type = index % 2 === 0 ? "triangle" : "sine";
-      oscillator.frequency.value = frequency;
-      gain.gain.setValueAtTime(0.0001, now + index * 0.12);
-      gain.gain.exponentialRampToValueAtTime(0.22, now + index * 0.12 + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + index * 0.12 + 0.28);
-      oscillator.connect(gain);
-      gain.connect(context.destination);
-      oscillator.start(now + index * 0.12);
-      oscillator.stop(now + index * 0.12 + 0.3);
-    });
-    window.setTimeout(() => context.close().catch(() => {}), 1600);
-  } catch {
-    // Browser autoplay policies can block audio until the user interacts.
-  }
-}
-
-function playWhoosh() {
-  try {
-    const AudioContext = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContext) return;
-    const context = new AudioContext();
-    const now = context.currentTime;
-    const oscillator = context.createOscillator();
-    const gain = context.createGain();
-    const filter = context.createBiquadFilter();
-    oscillator.type = "sawtooth";
-    oscillator.frequency.setValueAtTime(900, now);
-    oscillator.frequency.exponentialRampToValueAtTime(140, now + 0.32);
-    filter.type = "lowpass";
-    filter.frequency.setValueAtTime(2600, now);
-    filter.frequency.exponentialRampToValueAtTime(360, now + 0.32);
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(0.18, now + 0.03);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.36);
-    oscillator.connect(filter);
-    filter.connect(gain);
-    gain.connect(context.destination);
-    oscillator.start(now);
-    oscillator.stop(now + 0.38);
-    window.setTimeout(() => context.close().catch(() => {}), 700);
-  } catch {
-    // Browser autoplay policies can block audio until the user interacts.
-  }
 }
 
 function MultiChipGroup({ options, values = [], limit, allowCustom = false, disabled = false, onChange }) {
@@ -1500,23 +1201,6 @@ function MultiChipGroup({ options, values = [], limit, allowCustom = false, disa
   );
 }
 
-function TextModal({ field, value, onSave, onClose }) {
-  const [draft, setDraft] = useState(value || "");
-  const label = field === "problem" ? "문제" : "해결책";
-  return (
-    <div className="fixed inset-0 z-20 flex items-end bg-slate-900/50 p-4">
-      <div className="w-full rounded-lg bg-white p-5 shadow-lift">
-        <h3 className="text-xl font-black">{label}</h3>
-        <textarea value={draft} onChange={(event) => setDraft(event.target.value)} className="mt-3 min-h-36 w-full rounded-lg border border-slate-200 p-3 outline-none focus:border-indigo-500" placeholder={`${label}을 작성하세요`} />
-        <div className="mt-3 grid grid-cols-2 gap-2">
-          <button onClick={onClose} className="touch-button rounded-lg bg-slate-100 px-4 py-3 font-bold">취소</button>
-          <button onClick={() => { onSave(draft); onClose(); }} className="touch-button rounded-lg bg-indigo-600 px-4 py-3 font-bold text-white">저장</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function ReportModal({ team, members = [], onClose }) {
   const change = getAssetChange(team);
   const profit = change.delta;
@@ -1531,7 +1215,7 @@ function ReportModal({ team, members = [], onClose }) {
             <span key={member.uid} className="rounded-full bg-slate-100 px-3 py-2 text-xs font-black text-slate-700 ring-1 ring-slate-200">{member.nickname}</span>
           ))}
         </div>
-        <AssetTrendChart team={team} className="mt-4" />
+        <AssetTrendChart team={team} size="compact" className="mt-4" />
         <div className="mt-4 space-y-3 text-sm leading-6">
           <p><b>선택 트렌드:</b> {team.trendCard?.title || "미선택"}</p>
           <p><b>선택 기술카드:</b> {team.techCard?.title || "미선택"}</p>

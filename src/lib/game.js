@@ -1,6 +1,8 @@
 import { SIMULATION_EVENTS, TEAM_KEYS } from "../data/gameData.js";
 
 export const TEAM_BASE_ASSET = 100000000;
+/** Length of the management simulation in months. */
+export const SIMULATION_MONTHS = 24;
 /** Virtual budget each student can distribute across other teams during the investment phase. */
 export const INVESTMENT_BUDGET = 50000000;
 export const INVESTMENT_STEP = 1000000;

@@ -3,6 +3,10 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import AppShell from "./pages/AppShell.jsx";
 import "./styles.css";
+import { installAudioUnlock } from "./lib/audio.js";
+
+// Mobile browsers only allow sound after a user gesture; arm the shared AudioContext once.
+installAudioUnlock();
 
 const AdminPage = lazy(() => import("./pages/AdminPage.jsx"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage.jsx"));
