@@ -70,6 +70,7 @@ import { useAppSettings } from "../lib/appSettings.js";
 import { roomDocRef, useRoom } from "../hooks/useRoom.js";
 import { loginTeacher, logoutTeacher, registerTeacher, useTeacherAuth } from "../hooks/useTeacherAuth.js";
 import simulationBgm from "../images/bgm01.mp3";
+import bizQuestLogo from "../images/bizquest-logo.png";
 import heroBackgroundImage from "../images/landing-hero-ai-v2.webp";
 import processRoadmapImage from "../images/landing-process-roadmap.webp";
 import { AiEvaluationShowcase, EventCardVisual, FanfareOnResult, ResultFinalizingShowcase, ResultFireworks } from "../components/shared/Effects.jsx";
@@ -1415,12 +1416,12 @@ export default function AdminPage() {
   if (!room) return <div className="p-8">존재하지 않는 방입니다. <Link className="font-bold text-indigo-600" to="/">메인으로 이동</Link></div>;
 
   return (
-    <section className="mx-auto max-w-7xl px-5 py-6">
+    <section className="admin-dashboard mx-auto max-w-7xl px-5 py-6">
       <header className="admin-topbar">
         <div className="bizquest-brand" aria-label="비즈퀘스트">
-          <span className="bizquest-mark"><b>B</b><Rocket size={38} /></span>
+          <img className="bizquest-logo-image" src={bizQuestLogo} alt="" />
           <span>
-            <span className="bizquest-name"><b>BIZ</b> 퀘스트</span>
+            <span className="bizquest-name"><b>BIZ</b>QUEST</span>
             <span className="bizquest-tagline">아이디어를 창업으로, 가능성을 현실로</span>
           </span>
         </div>
@@ -1432,7 +1433,12 @@ export default function AdminPage() {
         </div>
       </header>
 
-      {room.sysMessage && <div className="event-notice ticker-pulse mt-4"><Megaphone size={24} /><div><p>진행 안내</p><strong>{room.sysMessage}</strong></div></div>}
+      {room.sysMessage && (
+        <div className="event-notice ticker-pulse mt-3">
+          <span className="event-notice-label"><Megaphone size={14} /> 진행 안내</span>
+          <div className="event-notice-window"><strong>{room.sysMessage}</strong></div>
+        </div>
+      )}
       {room.status === STATUSES.SIMULATION && !room.simulationRunning && Number(room.currentMonth || 0) < SIMULATION_MONTHS && (
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4">
           <div>
@@ -1460,8 +1466,8 @@ export default function AdminPage() {
       <FanfareOnResult status={room.status} />
       <ResultFireworks status={room.status} />
 
-      <div className="mt-6 grid gap-5 lg:grid-cols-[320px_1fr]">
-        <aside className="space-y-5">
+      <div className="admin-workspace mt-5 grid gap-4 lg:grid-cols-[288px_1fr]">
+        <aside className="admin-sidebar space-y-4">
           <div className={`qr-panel rounded-lg bg-white p-5 shadow-lift ${qrCollapsed ? "qr-panel-collapsed" : ""}`}>
             <button onClick={() => setQrCollapsed(!qrCollapsed)} className="qr-toggle" type="button">
               <span>학생 입장 QR</span>
@@ -1500,7 +1506,7 @@ export default function AdminPage() {
             </div>
           </div>
         </aside>
-        <div className="print-main space-y-5">
+        <div className="print-main admin-main-content space-y-4">
           <TeamGrid roomStatus={room.status} teams={teams} students={students} onOpenStudentMenu={(uid, teamKey) => setStudentMenu({ uid, teamKey, mode: "assigned" })} onRenameTeam={renameTeam} onAddTeam={addTeam} onDeleteTeam={deleteTeam} onLockPlan={lockBusinessPlan} onOpenPlan={setPlanTeam} onOpenOpinion={setOpinionTeam} />
           {investmentChartVisible && <InvestmentChart teams={teams} />}
           {room.status === STATUSES.RESULT && (
@@ -1539,12 +1545,12 @@ function getStudentOrigin(localNetworkHost) {
 
 function TeamGrid({ roomStatus, teams, students, onOpenStudentMenu, onRenameTeam, onAddTeam, onDeleteTeam, onLockPlan, onOpenPlan, onOpenOpinion }) {
   return (
-    <section>
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <h2 className="text-xl font-black">팀 구성 현황</h2>
-        <button onClick={onAddTeam} className="print:hidden touch-button inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white"><Plus size={16} /> 팀 추가</button>
+    <section className="admin-team-section">
+      <div className="admin-section-heading">
+        <div><p>TEAM DASHBOARD</p><h2>팀 구성 현황</h2></div>
+        <button onClick={onAddTeam} className="print:hidden admin-ui-button admin-ui-button-primary"><Plus size={15} /> 팀 추가</button>
       </div>
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <div className="admin-team-grid grid gap-4 md:grid-cols-2">
         {getTeamEntries(teams).map(([key, team]) => {
           const cardSelectionComplete = Boolean(team.trendCard && team.techCard);
           const members = getStudentsByTeam(students, key).sort((a, b) => {
@@ -1554,16 +1560,20 @@ function TeamGrid({ roomStatus, teams, students, onOpenStudentMenu, onRenameTeam
           });
           const diversity = team.diversity;
           return (
-            <section key={key} className="rounded-lg bg-white p-4 shadow-lift">
+            <section key={key} className="admin-team-card">
               <div className="admin-team-identity">
                 <div className="admin-team-main-row">
-                  <MascotAvatar mascotId={team.mascot} size="large" />
-                  <input key={`${key}-${team.teamName}`} defaultValue={team.teamName} onBlur={(event) => onRenameTeam(key, event.target.value)} className="min-w-0 w-full rounded-lg border border-transparent bg-slate-50 px-3 py-2 text-lg font-black focus:border-indigo-500 focus:outline-none" />
-                </div>
-                <div className="admin-team-meta-row">
-                  <span className="team-member-count" title="현재 팀 인원"><Users size={14} /> 총 {members.length}명</span>
-                  {team.teamSetupComplete && <span className="team-setup-complete"><CheckCircle2 size={13} /> 팀구성 완료</span>}
-                  <button title="팀 삭제" onClick={() => onDeleteTeam(key)} className="print:hidden admin-team-delete touch-button"><Trash2 size={17} /> 삭제</button>
+                  <div className="admin-team-avatar-column">
+                    <MascotAvatar mascotId={team.mascot} size="medium" />
+                    <span className="team-member-count" title="현재 팀 인원"><Users size={12} /> 총 {members.length}명</span>
+                  </div>
+                  <div className="admin-team-title-column">
+                    <input key={`${key}-${team.teamName}`} defaultValue={team.teamName} onBlur={(event) => onRenameTeam(key, event.target.value)} />
+                    <div className="admin-team-meta-row">
+                      {team.teamSetupComplete && <span className="team-setup-complete"><CheckCircle2 size={12} /> 팀구성 완료</span>}
+                      <button title="팀 삭제" onClick={() => onDeleteTeam(key)} className="print:hidden admin-team-delete"><Trash2 size={14} /> 삭제</button>
+                    </div>
+                  </div>
                 </div>
                 <p className={`admin-team-slogan ${team.teamSlogan ? "" : "admin-team-slogan-empty"}`}>
                   <span>팀 구호</span>
@@ -1579,7 +1589,7 @@ function TeamGrid({ roomStatus, teams, students, onOpenStudentMenu, onRenameTeam
                   <span className="text-xs font-bold text-slate-500">C레벨 자가진단 구성 보너스 → 기본 자산 {formatWon(getTeamBaseAsset(team))}</span>
                 </div>
               )}
-              <div className="mt-3 flex flex-wrap gap-2">
+              <div className="admin-team-members">
                 {members.map((student) => {
                   const diagnosisInProgress = roomStatus === STATUSES.C_LEVEL && !student.cLevelResult?.key;
                   const diagnosisComplete = roomStatus === STATUSES.C_LEVEL && Boolean(student.cLevelResult?.key);
@@ -1599,7 +1609,7 @@ function TeamGrid({ roomStatus, teams, students, onOpenStudentMenu, onRenameTeam
                 })}
                 {members.length === 0 && <span className="text-sm text-slate-400">팀원을 기다리는 중</span>}
               </div>
-              <div className={`mt-4 rounded-lg p-3 text-sm ${cardSelectionComplete ? "admin-card-selection-complete" : "bg-slate-50 text-slate-600"}`}>
+              <div className={`admin-team-details ${cardSelectionComplete ? "admin-card-selection-complete" : "admin-card-selection-empty"}`}>
                 {cardSelectionComplete ? (
                   <div className="admin-card-selection-body">
                     <div className="admin-card-selection-badge">
@@ -1617,9 +1627,9 @@ function TeamGrid({ roomStatus, teams, students, onOpenStudentMenu, onRenameTeam
                     <p>기술카드: {team.techCard ? <><CheckCircle2 size={14} className="mr-1 inline text-emerald-600" />{team.techCard.title}</> : "미선택"}</p>
                   </>
                 )}
-                <div className="print:hidden mt-3 grid grid-cols-[1fr_auto] gap-2">
-                  <button type="button" disabled={!team.idea || team.ideaSubmitted === false} onClick={() => onOpenPlan({ key, ...team })} className="touch-button rounded-lg bg-indigo-600 px-3 py-2 text-sm font-black text-white disabled:bg-slate-200 disabled:text-slate-400">{team.idea && team.ideaSubmitted !== false ? "사업계획 등록 완료!" : "사업계획서 미등록"}</button>
-                  <button type="button" disabled={!team.idea || team.ideaSubmitted === false || team.ideaLocked} onClick={() => onLockPlan(key)} className="touch-button rounded-lg bg-slate-900 px-3 py-2 text-sm font-black text-white disabled:bg-slate-200 disabled:text-slate-400">{team.ideaLocked ? "확정됨" : "확정"}</button>
+                <div className="print:hidden admin-team-actions">
+                  <button type="button" disabled={!team.idea || team.ideaSubmitted === false} onClick={() => onOpenPlan({ key, ...team })} className="admin-ui-button admin-ui-button-primary">{team.idea && team.ideaSubmitted !== false ? <><CheckCircle2 size={14} /> 사업계획 완료</> : <><FileText size={14} /> 사업계획 미등록</>}</button>
+                  <button type="button" disabled={!team.idea || team.ideaSubmitted === false || team.ideaLocked} onClick={() => onLockPlan(key)} className="admin-ui-button admin-ui-button-secondary">{team.ideaLocked ? <><CheckCircle2 size={14} /> 확정됨</> : <><ShieldCheck size={14} /> 확정</>}</button>
                 </div>
                 <InvestmentGauge team={team} />
                 <AiEvaluationSummary team={team} onOpenOpinion={() => onOpenOpinion({ key, ...team })} />
@@ -1846,7 +1856,7 @@ function StudentManageModal({ menu, students, teams, onClose, onAssign, onKick, 
 }
 
 function AiEvaluationSummary({ team, onOpenOpinion }) {
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
   const evaluation = team.aiEvaluation;
   if (!evaluation) {
     return <div className="mt-3 rounded-lg bg-slate-100 px-3 py-3 text-xs font-bold text-slate-500">AI 평가 대기</div>;
