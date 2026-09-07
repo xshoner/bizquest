@@ -74,7 +74,8 @@ import heroBackgroundImage from "../images/landing-hero-ai-v2.webp";
 import processRoadmapImage from "../images/landing-process-roadmap.webp";
 import { AiEvaluationShowcase, EventCardVisual, FanfareOnResult, ResultFinalizingShowcase, ResultFireworks } from "../components/shared/Effects.jsx";
 import { AssetChangeSummary, AssetTrendChart, gradeClassName } from "../components/shared/AssetCharts.jsx";
-import { playWhoosh } from "../lib/audio.js";
+import { installAudioUnlock, playWhoosh } from "../lib/audio.js";
+import { MascotAvatar } from "../components/shared/MascotAvatar.jsx";
 import { PHASE_TIMER_PRESETS_MIN, PhaseTimerDisplay } from "../components/shared/PhaseTimer.jsx";
 import { buildFullCsv, buildRoomJson, downloadTextFile, safeFileName } from "../lib/exportReport.js";
 
@@ -576,6 +577,8 @@ export default function AdminPage() {
   const adminSessionIdRef = useRef(makeAdminSessionId());
   const bgmRef = useRef(null);
   const resultBoardRef = useRef(null);
+
+  useEffect(() => installAudioUnlock(), []);
 
   useEffect(() => () => {
     clearSimulationTimers();
@@ -1355,8 +1358,8 @@ export default function AdminPage() {
       const errorText = await response.text().catch(() => "");
       const hint = response.status === 401 || response.status === 403
         ? " 교사 로그인 상태가 만료되었거나 방 소유자가 아닙니다. 다시 로그인한 뒤 시도하세요."
-        : response.status === 502 && /LETSUR_API_KEY/.test(errorText)
-          ? ` 배포 도메인(${window.location.host})의 서버 환경변수 LETSUR_API_KEY를 확인하세요.`
+        : [500, 502].includes(response.status) && /GEMINI_API_KEY/.test(errorText)
+          ? ` 배포 도메인(${window.location.host})의 서버 환경변수 GEMINI_API_KEY를 확인하세요.`
           : "";
       throw new Error(`AI 응답 오류 ${response.status}.${hint}${errorText ? ` ${errorText.slice(0, 220)}` : ""}`);
     }
@@ -1552,8 +1555,12 @@ function TeamGrid({ roomStatus, teams, students, onOpenStudentMenu, onRenameTeam
           const diversity = team.diversity;
           return (
             <section key={key} className="rounded-lg bg-white p-4 shadow-lift">
-              <div className="flex items-center gap-2">
-                <input key={`${key}-${team.teamName}`} defaultValue={team.teamName} onBlur={(event) => onRenameTeam(key, event.target.value)} className="min-w-0 flex-1 rounded-lg border border-transparent bg-slate-50 px-3 py-2 text-lg font-black focus:border-indigo-500 focus:outline-none" />
+              <div className="admin-team-identity">
+                <MascotAvatar mascotId={team.mascot} size="large" />
+                <div className="admin-team-identity-copy">
+                  <input key={`${key}-${team.teamName}`} defaultValue={team.teamName} onBlur={(event) => onRenameTeam(key, event.target.value)} className="min-w-0 w-full rounded-lg border border-transparent bg-slate-50 px-3 py-2 text-lg font-black focus:border-indigo-500 focus:outline-none" />
+                  <p title={team.teamSlogan || ""}>{team.teamSlogan ? `“${team.teamSlogan}”` : "팀 구호를 기다리는 중"}</p>
+                </div>
                 <span className="team-member-count" title="현재 팀 인원"><Users size={14} /> 총 {members.length}명</span>
                 <button title="팀 삭제" onClick={() => onDeleteTeam(key)} className="print:hidden touch-button grid w-12 place-items-center rounded-lg bg-rose-50 text-rose-600"><Trash2 size={18} /></button>
               </div>

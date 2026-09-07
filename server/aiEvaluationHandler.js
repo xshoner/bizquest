@@ -9,17 +9,16 @@
 import {
   assessStudentPlanQuality,
   buildEvaluationPrompt,
-  extractChatCompletionText,
   isPlanSubmitted,
   makeClearlyInvalidAiEvaluation,
   normalizeAiEvaluation,
   stripJsonFence
 } from "../src/lib/aiEvaluation.js";
 
-const LETSUR_CHAT_COMPLETIONS_URL = "https://gw.letsur.ai/v1/chat/completions";
-const LETSUR_MODEL = "gemini-2.5-pro";
+const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
+const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash";
 const DEFAULT_FIREBASE_PROJECT_ID = "startup-5ec16";
-const LETSUR_TIMEOUT_MS = 45000;
+const GEMINI_TIMEOUT_MS = 45000;
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 
 function textResponse(status, message) {
@@ -87,21 +86,23 @@ async function fetchRoomWithToken({ projectId, ownerUid, roomId, idToken, fetchI
   return { room: decodeFirestoreFields(document.fields || {}) };
 }
 
-async function callLetsur({ apiKey, prompt, fetchImpl }) {
+async function callGemini({ apiKey, model, prompt, fetchImpl }) {
   const controller = typeof AbortController === "function" ? new AbortController() : null;
-  const timer = controller ? setTimeout(() => controller.abort(), LETSUR_TIMEOUT_MS) : null;
+  const timer = controller ? setTimeout(() => controller.abort(), GEMINI_TIMEOUT_MS) : null;
   try {
-    const response = await fetchImpl(LETSUR_CHAT_COMPLETIONS_URL, {
+    const endpoint = `${GEMINI_API_BASE}/${encodeURIComponent(model)}:generateContent`;
+    const response = await fetchImpl(endpoint, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        "x-goog-api-key": apiKey,
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        model: LETSUR_MODEL,
-        messages: [{ role: "user", content: prompt }],
-        temperature: 0.25,
-        response_format: { type: "json_object" }
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: {
+          temperature: 0.25,
+          responseMimeType: "application/json"
+        }
       }),
       signal: controller?.signal
     });
@@ -124,8 +125,9 @@ async function callLetsur({ apiKey, prompt, fetchImpl }) {
 export async function handleAiEvaluationRequest({ method, authorization, rawBody, env, fetchImpl = fetch }) {
   if (method !== "POST") return textResponse(405, "Method Not Allowed");
 
-  const letsurApiKey = env?.LETSUR_API_KEY;
-  if (!letsurApiKey) return textResponse(500, "LETSUR_API_KEY environment variable is missing.");
+  const geminiApiKey = env?.GEMINI_API_KEY;
+  if (!geminiApiKey) return textResponse(500, "GEMINI_API_KEY environment variable is missing.");
+  const geminiModel = env?.GEMINI_MODEL || DEFAULT_GEMINI_MODEL;
   const projectId = env?.FIREBASE_PROJECT_ID || DEFAULT_FIREBASE_PROJECT_ID;
 
   const idToken = String(authorization || "").replace(/^Bearer\s+/i, "").trim();
@@ -168,25 +170,27 @@ export async function handleAiEvaluationRequest({ method, authorization, rawBody
     .map(([, other]) => other);
   const prompt = buildEvaluationPrompt(team, comparisonTeams);
 
-  let letsur;
+  let gemini;
   try {
-    letsur = await callLetsur({ apiKey: letsurApiKey, prompt, fetchImpl });
+    gemini = await callGemini({ apiKey: geminiApiKey, model: geminiModel, prompt, fetchImpl });
   } catch (err) {
-    return textResponse(504, `Letsur request failed: ${String(err?.message || err).slice(0, 200)}`);
+    return textResponse(504, `Gemini request failed: ${String(err?.message || err).slice(0, 200)}`);
   }
-  const { response, responseText } = letsur;
+  const { response, responseText } = gemini;
   if (response.status === 401 || response.status === 403) {
-    return textResponse(502, `Letsur API key was rejected with ${response.status}. Check the server-side LETSUR_API_KEY environment variable.`);
+    return textResponse(502, `Gemini API key was rejected with ${response.status}. Check the server-side GEMINI_API_KEY environment variable.`);
   }
   if (!response.ok) {
-    return textResponse(502, `Letsur responded with ${response.status}. ${responseText.slice(0, 300)}`);
+    return textResponse(502, `Gemini responded with ${response.status}. ${responseText.slice(0, 300)}`);
   }
 
   try {
     const completion = JSON.parse(responseText);
-    const raw = JSON.parse(stripJsonFence(extractChatCompletionText(completion)));
-    return jsonResponse(200, { evaluation: normalizeAiEvaluation(raw, team), source: "letsur" });
+    const text = (completion.candidates?.[0]?.content?.parts || []).map((part) => part?.text || "").join("");
+    if (!text) throw new Error("No text was returned by Gemini.");
+    const raw = JSON.parse(stripJsonFence(text));
+    return jsonResponse(200, { evaluation: normalizeAiEvaluation(raw, team), source: "gemini" });
   } catch (err) {
-    return textResponse(502, `Letsur returned malformed JSON: ${String(err?.message || err).slice(0, 200)}`);
+    return textResponse(502, `Gemini returned malformed JSON: ${String(err?.message || err).slice(0, 200)}`);
   }
 }

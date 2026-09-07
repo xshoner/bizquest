@@ -1,6 +1,6 @@
 ﻿import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { Award, Check, CircleDollarSign, Crown, Lightbulb, Pencil, RotateCcw, Send, TrendingUp, Volume2, VolumeX } from "lucide-react";
+import { Award, Check, CircleDollarSign, Crown, Lightbulb, Pencil, RotateCcw, Send, TrendingUp } from "lucide-react";
 import { auth, onAuthStateChanged, setDoc, signInAnonymously } from "../firebase.js";
 import {
   C_LEVEL_KEYS,
@@ -20,10 +20,11 @@ import { INVESTMENT_BUDGET, INVESTMENT_STEP, TEAM_BASE_ASSET, formatWon, getAsse
 import { studentDocRef, useRoom } from "../hooks/useRoom.js";
 import { updateOwnStudent, updateOwnTeam } from "../lib/roomStore.js";
 import { getEventImage, getTechCardImage, getTrendCardImage } from "../lib/assets.js";
-import { isSoundMuted, playWhoosh, setSoundMuted } from "../lib/audio.js";
 import { PhaseTimerDisplay } from "../components/shared/PhaseTimer.jsx";
-import { AiEvaluationShowcase, EventCardVisual, FanfareOnResult, ResultFinalizingShowcase, ResultFireworks } from "../components/shared/Effects.jsx";
+import { AiEvaluationShowcase, EventCardVisual, ResultFinalizingShowcase, ResultFireworks } from "../components/shared/Effects.jsx";
 import { AssetChangeSummary, AssetTrendChart, gradeClassName } from "../components/shared/AssetCharts.jsx";
+import { MascotAvatar } from "../components/shared/MascotAvatar.jsx";
+import { TEAM_MASCOTS } from "../lib/mascots.js";
 
 const BUDGET = INVESTMENT_BUDGET;
 
@@ -157,7 +158,6 @@ export default function StudentPage() {
     <MobileFrame>
       <PhaseTransition status={room.status} />
       {room.resultFinalizing && <ResultFinalizingShowcase variant="phase" />}
-      <FanfareOnResult status={room.status} />
       <ResultFireworks status={room.status} />
       <StudentHeader room={room} uid={authUid} student={student} />
       {room.sysMessage && <div className="ticker-pulse mb-4 rounded-lg bg-indigo-50 px-4 py-3 text-sm font-bold text-indigo-700">{room.sysMessage}</div>}
@@ -235,20 +235,6 @@ function StepIndicator({ status }) {
   );
 }
 
-function SoundToggle() {
-  const [muted, setMuted] = useState(() => isSoundMuted());
-  function toggle() {
-    const next = !muted;
-    setSoundMuted(next);
-    setMuted(next);
-  }
-  return (
-    <button type="button" onClick={toggle} className="sound-toggle" aria-pressed={muted} title={muted ? "효과음 켜기" : "효과음 끄기"}>
-      {muted ? <VolumeX size={16} /> : <Volume2 size={16} />}
-    </button>
-  );
-}
-
 function StudentHeader({ room, uid, student }) {
   const myTeam = room.teams?.[student.team];
   const isLeader = myTeam?.leaderId === uid;
@@ -277,25 +263,29 @@ function StudentHeader({ room, uid, student }) {
 
   return (
     <header className="sticky top-0 z-10 -mx-4 mb-4 border-b border-slate-200 bg-[#f5f7fb]/95 px-4 py-3 backdrop-blur">
-      <div className="flex items-center justify-between gap-2">
-        <p className="min-w-0 truncate text-xs font-bold text-indigo-600">{room.roomTitle} · {STATUS_LABELS[room.status]}</p>
-        <SoundToggle />
-      </div>
+      <p className="min-w-0 truncate text-xs font-bold text-indigo-600">{room.roomTitle} · {STATUS_LABELS[room.status]}</p>
       <StepIndicator status={room.status} />
       <PhaseTimerDisplay timer={room.phaseTimer} compact />
-      <div className="mt-1 flex items-center justify-between gap-3">
-        <div className="student-name-wrap">
-          <h1 className="min-w-0 truncate text-xl font-black">{student.nickname}</h1>
-          {student.cLevelResult?.key && <span className={`student-header-c-level c-level-mini-${student.cLevelResult.key}`}>{student.cLevelResult.key}</span>}
+      <div className="student-identity-bar">
+        <div className="student-identity-card student-identity-person">
+          <span className="student-identity-label">내 이름</span>
+          <div className="student-name-wrap">
+            <h1 className="min-w-0 truncate">{student.nickname}</h1>
+            {student.cLevelResult?.key && <span className={`student-header-c-level c-level-mini-${student.cLevelResult.key}`}>{student.cLevelResult.key}</span>}
+          </div>
         </div>
-        <div className="flex max-w-[58%] items-center gap-1 rounded-full bg-white px-3 py-1 text-sm font-bold text-slate-700">
-          {isLeader && <Crown size={14} className="text-amber-500" />}
+        <div className="student-identity-card student-identity-team">
+          <span className="student-identity-label">우리 팀</span>
+          <div className="student-team-name-row">
+          {myTeam && <MascotAvatar mascotId={myTeam.mascot} size="tiny" />}
+          {isLeader && <Crown size={14} className="text-amber-300" />}
           {editing ? (
-            <input value={name} maxLength={30} onChange={(event) => setName(event.target.value)} onBlur={saveTeamName} onKeyDown={(event) => event.key === "Enter" && event.currentTarget.blur()} autoFocus className="min-w-0 bg-transparent outline-none" />
+            <input value={name} maxLength={30} onChange={(event) => setName(event.target.value)} onBlur={saveTeamName} onKeyDown={(event) => event.key === "Enter" && event.currentTarget.blur()} autoFocus />
           ) : (
-            <span className="truncate">{myTeam?.teamName || "팀 미선택"}</span>
+            <strong className="truncate">{myTeam?.teamName || "팀 미선택"}</strong>
           )}
           {isLeader && !editing && <button onClick={() => setEditing(true)} title="팀 이름 변경"><Pencil size={14} /></button>}
+          </div>
         </div>
       </div>
     </header>
@@ -304,6 +294,14 @@ function StudentHeader({ room, uid, student }) {
 function WaitingRoom({ room, uid }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const selectedTeamKey = room.students?.[uid]?.team;
+  const selectedTeam = room.teams?.[selectedTeamKey];
+  const isLeader = selectedTeam?.leaderId === uid;
+  const [slogan, setSlogan] = useState(selectedTeam?.teamSlogan || "");
+
+  useEffect(() => {
+    setSlogan(selectedTeam?.teamSlogan || "");
+  }, [selectedTeamKey, selectedTeam?.teamSlogan]);
 
   async function selectTeam(teamKey) {
     if (busy) return;
@@ -320,6 +318,25 @@ function WaitingRoom({ room, uid }) {
     }
   }
 
+  async function updateTeamIdentity(patch, message) {
+    if (!selectedTeamKey || !isLeader || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await updateOwnTeam(room.ownerUid, room.roomId, selectedTeamKey, patch, message);
+    } catch (err) {
+      setError(writeErrorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveSlogan() {
+    const nextSlogan = slogan.trim().slice(0, 40);
+    setSlogan(nextSlogan);
+    await updateTeamIdentity({ teamSlogan: nextSlogan }, nextSlogan ? `우리 팀 구호: ${nextSlogan}` : "팀 구호를 비웠습니다.");
+  }
+
   return (
     <section>
       <h2 className="text-2xl font-black">팀을 선택하세요</h2>
@@ -330,12 +347,43 @@ function WaitingRoom({ room, uid }) {
           const selected = room.students?.[uid]?.team === key;
           return (
             <button key={key} disabled={busy} onClick={() => selectTeam(key)} className={`touch-button rounded-lg p-4 text-left shadow-lift ${selected ? "selected-team-card text-white" : "bg-white text-slate-900"}`}>
-              <p className="break-keep text-xl font-black">{team.teamName}</p>
+              <div className="waiting-team-title"><MascotAvatar mascotId={team.mascot} size="small" /><p className="break-keep text-xl font-black">{team.teamName}</p></div>
               <p className={`mt-1 text-sm ${selected ? "text-white/85" : "text-slate-500"}`}>{count}명 참여{selected ? " · 선택됨" : ""}</p>
             </button>
           );
         })}
       </div>
+      {selectedTeam && (
+        <section className="team-identity-setup">
+          <div className="team-identity-heading">
+            <MascotAvatar mascotId={selectedTeam.mascot} size="large" />
+            <div><p>우리 회사 만들기</p><h3>마스코트와 팀 구호</h3></div>
+          </div>
+          {isLeader ? (
+            <>
+              <p className="team-identity-guide">팀을 표현하는 마스코트를 하나 골라 주세요.</p>
+              <div className="mascot-picker" role="list" aria-label="회사 마스코트 선택">
+                {TEAM_MASCOTS.map((mascot) => (
+                  <button key={mascot.id} type="button" disabled={busy} className={selectedTeam.mascot === mascot.id ? "selected" : ""} onClick={() => updateTeamIdentity({ mascot: mascot.id }, `${selectedTeam.teamName}의 마스코트가 정해졌습니다.`)} title={mascot.name}>
+                    <MascotAvatar mascotId={mascot.id} size="medium" />
+                    <span>{mascot.name}</span>
+                  </button>
+                ))}
+              </div>
+              <label className="team-slogan-field">
+                <span>팀 구호 만들기 <b>{slogan.length}/40</b></span>
+                <input value={slogan} maxLength={40} onChange={(event) => setSlogan(event.target.value)} onKeyDown={(event) => event.key === "Enter" && saveSlogan()} placeholder="예: 아이디어를 현실로, 우리는 할 수 있다!" />
+              </label>
+              <button type="button" disabled={busy} onClick={saveSlogan} className="team-slogan-save">{busy ? "저장 중..." : "팀 구호 저장"}</button>
+            </>
+          ) : (
+            <div className="team-identity-readonly">
+              <strong>{selectedTeam.teamSlogan || "아직 팀 구호를 정하지 않았어요."}</strong>
+              <span>팀장이 마스코트와 구호를 정할 수 있습니다.</span>
+            </div>
+          )}
+        </section>
+      )}
     </section>
   );
 }
@@ -348,6 +396,7 @@ function CLevelDiagnosis({ room, uid, student }) {
   const [result, setResult] = useState(savedResult || null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [celebrating, setCelebrating] = useState(false);
   const question = C_LEVEL_QUESTIONS[current];
   const selected = answers[current];
   const progress = result ? 100 : Math.round((answers.filter((answer) => answer !== null).length / C_LEVEL_QUESTIONS.length) * 100);
@@ -358,6 +407,12 @@ function CLevelDiagnosis({ room, uid, student }) {
       setStarted(true);
     }
   }, [savedResult?.key]);
+
+  useEffect(() => {
+    if (!celebrating) return undefined;
+    const timer = window.setTimeout(() => setCelebrating(false), 4200);
+    return () => window.clearTimeout(timer);
+  }, [celebrating]);
 
   async function finishDiagnosis() {
     const scores = C_LEVEL_KEYS.map(() => 0);
@@ -382,6 +437,7 @@ function CLevelDiagnosis({ room, uid, student }) {
     try {
       await updateOwnStudent(room.ownerUid, room.roomId, uid, { cLevelResult: payload });
       setResult(payload);
+      setCelebrating(true);
     } catch (err) {
       setError(writeErrorMessage(err, "진단 결과를 저장하지 못했습니다. 다시 시도하세요."));
     } finally {
@@ -423,6 +479,7 @@ function CLevelDiagnosis({ room, uid, student }) {
     const maxScore = Math.max(1, ...scores);
     return (
       <section className="c-level-screen">
+        {celebrating && <div className="result-fireworks c-level-result-fireworks" aria-hidden="true">{Array.from({ length: 22 }, (_, index) => <span key={index} />)}</div>}
         <div className="c-level-result-hero">
           <p className="c-level-result-label">{type.key}</p>
           <h2>{type.title}</h2>
@@ -1077,7 +1134,6 @@ function StudentEventShowcase({ event, impact, month, team }) {
   }).join(" ");
 
   useEffect(() => {
-    playWhoosh();
     setImpactVisible(false);
     const timer = window.setTimeout(() => setImpactVisible(true), 1500);
     return () => window.clearTimeout(timer);
@@ -1088,15 +1144,15 @@ function StudentEventShowcase({ event, impact, month, team }) {
       <div className="event-spark event-spark-one" />
       <div className="event-spark event-spark-two" />
       <div className="student-event-card-wrap">
-        <EventCardVisual event={event} />
-        {impactVisible && activeImpact && (
-          <div className={`student-impact-badge ${rate >= 0 ? "student-impact-positive" : "student-impact-negative"}`} role="status" aria-live="polite">
-            <span className="student-impact-ring" aria-hidden="true" />
-            <span className="student-impact-arrow">{rate >= 0 ? "▲" : "▼"}</span>
-            <span className="student-impact-value">{rate > 0 ? "+" : ""}{rate}%</span>
-            <span className="student-impact-caption">{rate >= 0 ? "자산 증가" : "자산 감소"} · {activeImpact.grade}</span>
-          </div>
-        )}
+        <EventCardVisual event={event}>
+          {impactVisible && activeImpact && (
+            <div className={`event-card-impact-float ${rate >= 0 ? "student-impact-positive" : "student-impact-negative"}`} role="status" aria-live="polite">
+              <span>{rate >= 0 ? "▲" : "▼"}</span>
+              <strong>{rate > 0 ? "+" : ""}{rate}%</strong>
+              <small>{rate >= 0 ? "자산 증가" : "자산 감소"} · {activeImpact.grade}</small>
+            </div>
+          )}
+        </EventCardVisual>
       </div>
       <div className={`student-event-asset-overlay ${activeImpact ? "student-event-asset-applied" : "student-event-asset-waiting"} ${changedAmount < 0 ? "student-event-asset-negative" : "student-event-asset-positive"}`}>
         <div>
@@ -1286,5 +1342,3 @@ function ReportModal({ team, members = [], onClose }) {
 function Notice({ children }) {
   return <div className="rounded-lg bg-white p-5 text-center font-bold shadow-lift">{children}</div>;
 }
-
-

@@ -63,14 +63,14 @@ const roomDocument = {
   }
 };
 
-const letsurBody = JSON.stringify({
-  choices: [{ message: { content: "```json\n" + JSON.stringify({
+const geminiBody = JSON.stringify({
+  candidates: [{ content: { parts: [{ text: "```json\n" + JSON.stringify({
     factors: { F01: { grade: "양호", reason: "고객이 분명하다" }, F02: { grade: "취약", reason: "경쟁 분석 부족" }, F99: { grade: "양호" } },
     opinion: "좋은 출발입니다."
-  }) + "\n```" } }]
+  }) + "\n```" }] } }]
 });
 
-function mockFetch({ firestoreStatus = 200, letsurStatus = 200, letsurText = letsurBody } = {}) {
+function mockFetch({ firestoreStatus = 200, geminiStatus = 200, geminiText = geminiBody } = {}) {
   const calls = [];
   const impl = async (url, init = {}) => {
     calls.push({ url, init });
@@ -78,12 +78,13 @@ function mockFetch({ firestoreStatus = 200, letsurStatus = 200, letsurText = let
       assert.equal(init.headers.Authorization.startsWith("Bearer "), true, "Firestore call must forward the ID token");
       return new Response(firestoreStatus === 200 ? JSON.stringify(roomDocument) : "denied", { status: firestoreStatus });
     }
-    if (String(url).startsWith("https://gw.letsur.ai/")) {
-      assert.equal(init.headers.Authorization, "Bearer test-key");
+    if (String(url).startsWith("https://generativelanguage.googleapis.com/")) {
+      assert.match(String(url), /models\/gemini-2\.5-flash:generateContent$/);
+      assert.equal(init.headers["x-goog-api-key"], "test-key");
       const body = JSON.parse(init.body);
-      assert.equal(body.response_format.type, "json_object");
-      calls.prompt = body.messages[0].content;
-      return new Response(letsurText, { status: letsurStatus, headers: { "Content-Type": "application/json" } });
+      assert.equal(body.generationConfig.responseMimeType, "application/json");
+      calls.prompt = body.contents[0].parts[0].text;
+      return new Response(geminiText, { status: geminiStatus, headers: { "Content-Type": "application/json" } });
     }
     throw new Error(`unexpected fetch ${url}`);
   };
@@ -91,7 +92,7 @@ function mockFetch({ firestoreStatus = 200, letsurStatus = 200, letsurText = let
   return impl;
 }
 
-const env = { LETSUR_API_KEY: "test-key", FIREBASE_PROJECT_ID: PROJECT };
+const env = { GEMINI_API_KEY: "test-key", FIREBASE_PROJECT_ID: PROJECT };
 const body = (teamKey = "A") => JSON.stringify({ ownerUid: OWNER, roomId: "ABC123", teamKey });
 
 async function run() {
@@ -119,7 +120,7 @@ async function run() {
     assert.equal(fetchImpl.calls.length, 0);
   }
 
-  // Firestore rejecting the token → 401, Letsur never called
+  // Firestore rejecting the token → 401, Gemini never called
   {
     const fetchImpl = mockFetch({ firestoreStatus: 403 });
     const res = await handleAiEvaluationRequest({ method: "POST", env, authorization: `Bearer ${teacherToken}`, rawBody: body(), fetchImpl });
@@ -137,7 +138,7 @@ async function run() {
     const res = await handleAiEvaluationRequest({ method: "POST", env, authorization: `Bearer ${teacherToken}`, rawBody: body(), fetchImpl });
     assert.equal(res.status, 200, res.body);
     const payload = JSON.parse(res.body);
-    assert.equal(payload.source, "letsur");
+    assert.equal(payload.source, "gemini");
     assert.equal(payload.evaluation.factors.F01.grade, "양호");
     assert.equal(payload.evaluation.factors.F02.grade, "취약");
     assert.equal(payload.evaluation.factors.F03.grade, "보통");
@@ -148,7 +149,7 @@ async function run() {
     assert.doesNotMatch(fetchImpl.calls.prompt, /팀 C \|/, "unsubmitted teams are excluded");
   }
 
-  // Team that failed the quality pre-check → deterministic result without calling Letsur
+  // Team that failed the quality pre-check → deterministic result without calling Gemini
   {
     const fetchImpl = mockFetch();
     const res = await handleAiEvaluationRequest({ method: "POST", env, authorization: `Bearer ${teacherToken}`, rawBody: body("B"), fetchImpl });
@@ -163,9 +164,9 @@ async function run() {
   assert.equal((await handleAiEvaluationRequest({ method: "POST", env, authorization: `Bearer ${teacherToken}`, rawBody: body("C"), fetchImpl: mockFetch() })).status, 409);
   assert.equal((await handleAiEvaluationRequest({ method: "POST", env, authorization: `Bearer ${teacherToken}`, rawBody: body("Z"), fetchImpl: mockFetch() })).status, 404);
 
-  // Letsur failures surface as 502 so the client can fall back
-  assert.equal((await handleAiEvaluationRequest({ method: "POST", env, authorization: `Bearer ${teacherToken}`, rawBody: body(), fetchImpl: mockFetch({ letsurStatus: 401 }) })).status, 502);
-  assert.equal((await handleAiEvaluationRequest({ method: "POST", env, authorization: `Bearer ${teacherToken}`, rawBody: body(), fetchImpl: mockFetch({ letsurText: "not json" }) })).status, 502);
+  // Gemini failures surface as 502 so the client can fall back
+  assert.equal((await handleAiEvaluationRequest({ method: "POST", env, authorization: `Bearer ${teacherToken}`, rawBody: body(), fetchImpl: mockFetch({ geminiStatus: 401 }) })).status, 502);
+  assert.equal((await handleAiEvaluationRequest({ method: "POST", env, authorization: `Bearer ${teacherToken}`, rawBody: body(), fetchImpl: mockFetch({ geminiText: "not json" }) })).status, 502);
 
   // Derived investments: budget/self-investment violations are ignored, totals computed on read
   {

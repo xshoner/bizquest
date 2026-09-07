@@ -27,6 +27,8 @@ export function makeTeam(teamKey, index = 0) {
   return {
     teamId: teamKey,
     teamName: `팀 ${label}`,
+    mascot: null,
+    teamSlogan: "",
     leaderId: null,
     trendCard: null,
     techCard: null,
