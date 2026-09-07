@@ -125,7 +125,7 @@ async function callGemini({ apiKey, model, prompt, fetchImpl }) {
 export async function handleAiEvaluationRequest({ method, authorization, rawBody, env, fetchImpl = fetch }) {
   if (method !== "POST") return textResponse(405, "Method Not Allowed");
 
-  const geminiApiKey = env?.GEMINI_API_KEY;
+  const geminiApiKey = String(env?.GEMINI_API_KEY || "").trim();
   if (!geminiApiKey) return textResponse(500, "GEMINI_API_KEY environment variable is missing.");
   const projectId = env?.FIREBASE_PROJECT_ID || DEFAULT_FIREBASE_PROJECT_ID;
 
@@ -176,8 +176,9 @@ export async function handleAiEvaluationRequest({ method, authorization, rawBody
     return textResponse(504, `Gemini request failed: ${String(err?.message || err).slice(0, 200)}`);
   }
   const { response, responseText } = gemini;
-  if (response.status === 401 || response.status === 403) {
-    return textResponse(502, `Gemini API key was rejected with ${response.status}. Check the server-side GEMINI_API_KEY environment variable.`);
+  const invalidApiKey = response.status === 400 && /API_KEY_INVALID|API key not valid/i.test(responseText);
+  if (invalidApiKey || response.status === 401 || response.status === 403) {
+    return textResponse(502, `Gemini API key was rejected with ${response.status}. Cloudflare Pages의 Production 환경변수 GEMINI_API_KEY를 새 키로 저장하고 다시 배포하세요. 미리보기 주소는 Preview 환경도 확인하세요.`);
   }
   if (!response.ok) {
     return textResponse(502, `Gemini responded with ${response.status}. ${responseText.slice(0, 300)}`);
@@ -185,7 +186,7 @@ export async function handleAiEvaluationRequest({ method, authorization, rawBody
 
   try {
     const completion = JSON.parse(responseText);
-    const text = (completion.candidates?.[0]?.content?.parts || []).map((part) => part?.text || "").join("");
+    const text = (completion.candidates?.[0]?.content?.parts || []).filter((part) => !part.thought).map((part) => part?.text || "").join("");
     if (!text) throw new Error("No text was returned by Gemini.");
     const raw = JSON.parse(stripJsonFence(text));
     return jsonResponse(200, { evaluation: normalizeAiEvaluation(raw, team), source: "gemini" });

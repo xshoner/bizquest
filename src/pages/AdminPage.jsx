@@ -1915,6 +1915,7 @@ function InvestmentGauge({ team }) {
           <strong className={hasBonus ? "text-rose-600" : ""}>{formatWon(baseAsset)}</strong>
         </p>
         <p><span>투자유치</span><strong className="text-indigo-700">{formatWon(investment)}</strong></p>
+        <p><span>총액</span><strong className="text-slate-950">{formatWon(baseAsset + investment)}</strong></p>
       </div>
       <div className="asset-gauge" role="img" aria-label={`기본자산 ${formatWon(baseAsset)}, 투자유치 ${formatWon(investment)}`}>
         <div className={`asset-gauge-base ${hasBonus ? (bonusRate > 0 ? "asset-gauge-base-plus" : "asset-gauge-base-minus") : ""}`} style={{ width: `${baseWidth}%` }} />
@@ -2126,6 +2127,7 @@ function ResultBoard({ rankedTeams, teams, students, room }) {
                   <div className="report-capital mt-3">
                     <span>기본 자산 {formatWon(getTeamBaseAsset(team))}</span>
                     <span>투자 유치 {formatWon(team.investmentsReceived || 0)}</span>
+                    <span>총액 {formatWon(getTeamBaseAsset(team) + Number(team.investmentsReceived || 0))}</span>
                   </div>
                 </div>
               </div>
@@ -2170,7 +2172,7 @@ function makeAiEvaluationMessage(evaluations = {}) {
   const fallbackCount = values.filter((evaluation) => isFallbackEvaluation(evaluation)).length;
   const aiSuccessCount = Math.max(0, values.length - fallbackCount);
   if (fallbackCount > 0) {
-    return `AI 평가 완료: 렛서 AI 성공 ${aiSuccessCount}팀, 기본 평가 적용 ${fallbackCount}팀. 평가의견에서 실패 사유를 확인하세요.`;
+    return `AI 평가 완료: Gemini 성공 ${aiSuccessCount}팀, 기본 평가 적용 ${fallbackCount}팀. 평가의견에서 실패 사유를 확인하세요.`;
   }
   return `AI 사업계획서 평가가 완료되었습니다. 팀 패널에서 14개 지표와 1~2줄 종합의견을 확인하세요.`;
 }

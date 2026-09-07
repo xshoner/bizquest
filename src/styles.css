@@ -3447,6 +3447,9 @@ select {
 }
 
 .student-event-asset-overlay {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
   z-index: 3;
   display: grid;
   width: min(88vw, 390px);
@@ -3467,9 +3470,7 @@ select {
 }
 
 .student-event-asset-waiting {
-  background:
-    radial-gradient(circle at 10% 10%, rgba(255, 255, 255, 0.2), transparent 25%),
-    linear-gradient(135deg, rgba(15, 23, 42, 0.9), rgba(49, 46, 129, 0.88)) !important;
+  background: #343a40 !important;
 }
 
 .student-event-asset-positive {
@@ -3483,6 +3484,48 @@ select {
     radial-gradient(circle at 10% 10%, rgba(255, 255, 255, 0.22), transparent 25%),
     linear-gradient(135deg, rgba(30, 64, 175, 0.96), rgba(14, 165, 233, 0.94));
 }
+
+.student-event-asset-applied::before {
+  content: "↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑";
+  position: absolute;
+  inset: -10px;
+  z-index: -1;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  color: rgba(255, 255, 255, 0.14);
+  font-size: 44px;
+  font-weight: 900;
+  line-height: 1.1;
+  letter-spacing: 10px;
+  pointer-events: none;
+}
+
+.student-event-asset-applied.student-event-asset-negative::before {
+  content: "↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓";
+}
+
+.team-funding-summary, .c-level-role-list {
+  margin: 0 0 20px;
+  padding: 20px;
+  border: 1px solid #c7d2fe;
+  border-radius: 16px;
+  background: #fff;
+}
+.team-funding-summary h2 { font-size: 18px; font-weight: 900; }
+.team-funding-summary dl { display: grid; gap: 10px; margin-top: 14px; }
+.team-funding-summary dl > div { display: flex; justify-content: space-between; gap: 12px; }
+.team-funding-summary dd { font-weight: 900; }
+.team-funding-summary dl > div:last-child { border-top: 1px solid #e2e8f0; padding-top: 10px; color: #4338ca; }
+.team-funding-summary > p, .c-level-role-list p, .c-level-result-hero .c-level-role-description {
+  font-size: 12px;
+  line-height: 1.7;
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+.team-funding-summary > p { margin-top: 12px; color: #64748b; }
+.c-level-role-list { margin-top: 16px; }
+.c-level-role-list > div { margin-top: 14px; }
+.c-level-role-list p { margin-top: 3px; color: #475569; }
 
 .student-event-asset-overlay p {
   margin: 0;

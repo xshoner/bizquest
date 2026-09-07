@@ -4,6 +4,7 @@ import { Award, Check, CircleDollarSign, Crown, Lightbulb, Pencil, RotateCcw, Se
 import { auth, onAuthStateChanged, setDoc, signInAnonymously } from "../firebase.js";
 import {
   C_LEVEL_KEYS,
+  C_LEVEL_ROLES,
   C_LEVEL_QUESTIONS,
   C_LEVEL_TYPES,
   CUSTOMER_OPTIONS,
@@ -166,6 +167,7 @@ export default function StudentPage() {
       {room.status === STATUSES.CARD_SELECT && <CardSelect room={room} uid={authUid} student={student} />}
       {room.status === STATUSES.IDEATION && <Ideation room={room} uid={authUid} student={student} />}
       {room.status === STATUSES.AI_EVALUATION && <AiEvaluation room={room} student={student} />}
+      {[STATUSES.INVESTMENT, STATUSES.SIMULATION, STATUSES.RESULT].includes(room.status) && <TeamFundingSummary room={room} student={student} />}
       {room.status === STATUSES.INVESTMENT && <Investment room={room} uid={authUid} student={student} />}
       {room.status === STATUSES.SIMULATION && <Simulation room={room} student={student} />}
       {room.status === STATUSES.RESULT && <Result room={room} />}
@@ -296,6 +298,7 @@ function WaitingRoom({ room, uid }) {
   const [busy, setBusy] = useState(false);
   const selectedTeamKey = room.students?.[uid]?.team;
   const selectedTeam = room.teams?.[selectedTeamKey];
+  const teamLocked = selectedTeam?.teamSetupComplete === true;
   const isLeader = selectedTeam?.leaderId === uid;
   const [setupName, setSetupName] = useState(selectedTeam?.teamName || "");
   const [selectedMascotId, setSelectedMascotId] = useState(selectedTeam?.mascot || "");
@@ -308,7 +311,7 @@ function WaitingRoom({ room, uid }) {
   }, [selectedTeamKey, selectedTeam?.teamName, selectedTeam?.mascot, selectedTeam?.teamSlogan]);
 
   async function selectTeam(teamKey) {
-    if (busy) return;
+    if (busy || teamLocked || room.teams?.[teamKey]?.teamSetupComplete) return;
     const currentTeam = room.students?.[uid]?.team;
     const nextTeam = currentTeam === teamKey ? null : teamKey;
     setBusy(true);
@@ -329,7 +332,7 @@ function WaitingRoom({ room, uid }) {
       setError("팀 이름, 마스코트, 팀 구호를 모두 정해 주세요.");
       return;
     }
-    if (!selectedTeamKey || !isLeader || busy) return;
+    if (!selectedTeamKey || !isLeader || busy || teamLocked) return;
     setSetupName(nextName);
     setSlogan(nextSlogan);
     setBusy(true);
@@ -351,16 +354,17 @@ function WaitingRoom({ room, uid }) {
 
   return (
     <section>
-      <h2 className="text-2xl font-black">팀을 선택하세요</h2>
+      <h2 className="text-2xl font-black">{teamLocked ? "우리 팀 구성이 완료되었습니다" : "팀을 선택하세요"}</h2>
+      {teamLocked && <p className="mt-2 text-sm text-slate-600">팀 변경은 관리자만 할 수 있습니다.</p>}
       <ErrorBanner message={error} onDismiss={() => setError("")} />
       <div className="mt-4 grid grid-cols-2 gap-3">
-        {getTeamEntries(room.teams).map(([key, team]) => {
+        {getTeamEntries(room.teams).filter(([key]) => !teamLocked || key === selectedTeamKey).map(([key, team]) => {
           const count = Object.values(room.students || {}).filter((member) => member.team === key).length;
           const selected = room.students?.[uid]?.team === key;
           return (
-            <button key={key} disabled={busy} onClick={() => selectTeam(key)} className={`touch-button rounded-lg p-4 text-left shadow-lift ${selected ? "selected-team-card text-white" : "bg-white text-slate-900"}`}>
+            <button key={key} disabled={busy || teamLocked || team.teamSetupComplete} onClick={() => selectTeam(key)} className={`touch-button rounded-lg p-4 text-left shadow-lift disabled:cursor-not-allowed ${selected ? "selected-team-card text-white" : "bg-white text-slate-900"}`}>
               <div className="waiting-team-title"><MascotAvatar mascotId={team.mascot} size="small" /><p className="break-keep text-xl font-black">{team.teamName}</p></div>
-              <p className={`mt-1 text-sm ${selected ? "text-white/85" : "text-slate-500"}`}>{count}명 참여{selected ? " · 선택됨" : ""}</p>
+              <p className={`mt-1 text-sm ${selected ? "text-white/85" : "text-slate-500"}`}>{count}명 참여{team.teamSetupComplete ? " · 구성 완료" : selected ? " · 선택됨" : ""}</p>
             </button>
           );
         })}
@@ -371,7 +375,7 @@ function WaitingRoom({ room, uid }) {
             <MascotAvatar mascotId={selectedMascotId || selectedTeam.mascot} size="large" />
             <div><p>우리 회사 만들기</p><h3>팀 이름·마스코트·구호</h3></div>
           </div>
-          {isLeader ? (
+          {isLeader && !teamLocked ? (
             <>
               <label className="team-slogan-field team-name-field">
                 <span>팀 이름 <b>{setupName.length}/30</b></span>
@@ -395,7 +399,7 @@ function WaitingRoom({ room, uid }) {
           ) : (
             <div className="team-identity-readonly">
               <strong>{selectedTeam.teamSlogan || "아직 팀 구호를 정하지 않았어요."}</strong>
-              <span>팀장이 마스코트와 구호를 정할 수 있습니다.</span>
+              <span>{teamLocked ? "팀 구성이 완료되었습니다. 변경이 필요하면 관리자에게 요청하세요." : "팀장이 마스코트와 구호를 정할 수 있습니다."}</span>
             </div>
           )}
         </section>
@@ -498,6 +502,7 @@ function CLevelDiagnosis({ room, uid, student }) {
         {celebrating && <div className="result-fireworks c-level-result-fireworks" aria-hidden="true">{Array.from({ length: 22 }, (_, index) => <span key={index} />)}</div>}
         <div className="c-level-result-hero">
           <p className="c-level-result-label">{type.key}</p>
+          <p className="c-level-role-description">{C_LEVEL_ROLES[type.key].fullName} : {C_LEVEL_ROLES[type.key].description}</p>
           <h2>{type.title}</h2>
           <p>{type.sub}</p>
           <div className="c-level-score-bars">
@@ -524,6 +529,10 @@ function CLevelDiagnosis({ room, uid, student }) {
         <article className="c-level-jobs">
           <strong>어울리는 역할</strong>
           {type.jobs.map((job) => <p key={job}>{job}</p>)}
+        </article>
+        <article className="c-level-role-list">
+          <h3 className="font-black">C레벨 역할 알아보기</h3>
+          {C_LEVEL_KEYS.map((key) => <div key={key}><strong>{key}</strong><p>{C_LEVEL_ROLES[key].fullName} : {C_LEVEL_ROLES[key].description}</p></div>)}
         </article>
         <Notice>자가진단이 완료되었습니다. 교사가 다음 단계로 이동할 때까지 기다려 주세요.</Notice>
       </section>
@@ -883,6 +892,24 @@ function IdeaSummary({ team, idea }) {
     </article>
   );
 }
+function TeamFundingSummary({ room, student }) {
+  const team = room.teams?.[student.team];
+  if (!team) return null;
+  const baseAsset = getTeamBaseAsset(team);
+  const investment = Number(team.investmentsReceived || 0);
+  return (
+    <section className="team-funding-summary" aria-live="polite" aria-atomic="true">
+      <h2>{room.status === STATUSES.INVESTMENT ? "우리 팀 실시간 투자 유치" : "우리 팀 최종 투자유치 결과"}</h2>
+      <dl>
+        <div><dt>기본자산</dt><dd>{formatWon(baseAsset)}</dd></div>
+        <div><dt>투자유치</dt><dd>{formatWon(investment)}</dd></div>
+        <div><dt>총액</dt><dd>{formatWon(baseAsset + investment)}</dd></div>
+      </dl>
+      <p>{room.status === STATUSES.INVESTMENT ? "투자 확정된 금액이 실시간으로 반영됩니다." : "투자 종료 시점의 자산이며, 경영시뮬레이션 손익은 포함하지 않습니다."}</p>
+    </section>
+  );
+}
+
 function Investment({ room, uid, student }) {
   const availableTeams = getTeamEntries(room.teams).filter(([key]) => key !== student.team);
   const availableKeys = availableTeams.map(([key]) => key);

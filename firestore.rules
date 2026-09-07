@@ -95,7 +95,7 @@ service cloud.firestore {
       return data.keys().hasOnly(studentKeys())
         && data.uid == request.auth.uid
         && validNickname(data.nickname)
-        && (!('team' in data) || data.team == null || data.team is string)
+        && (!('team' in data) || data.team == null)
         && (!('investments' in data) || data.investments is map)
         && (!('investmentSubmitted' in data) || data.investmentSubmitted is bool);
     }
@@ -111,10 +111,22 @@ service cloud.firestore {
       return data.keys().hasOnly(studentKeys())
         && !changed.hasAny(['uid', 'joinedAt'])
         && (!changed.hasAny(['nickname']) || validNickname(data.nickname))
-        && (!changed.hasAny(['team']) || (status == 'WAITING' && (data.team == null || data.team is string)))
+        && (!changed.hasAny(['team']) || canChangeTeam(uid, roomId))
         && (!changed.hasAny(['cLevelResult']) || status == 'C_LEVEL')
         && (!changed.hasAny(['investments', 'investmentSubmitted'])
             || (status == 'INVESTMENT' && data.investments is map && data.investmentSubmitted is bool));
+    }
+
+    function openTeam(teams, key) {
+      return key == null || (key is string && key in teams
+        && teams[key].get('teamSetupComplete', false) != true);
+    }
+
+    function canChangeTeam(uid, roomId) {
+      let room = get(/databases/$(database)/documents/users/$(uid)/rooms/$(roomId)).data;
+      return room.status == 'WAITING'
+        && openTeam(room.teams, resource.data.get('team', null))
+        && openTeam(room.teams, request.resource.data.get('team', null));
     }
 
     // ------------------------------------------------------------------ team (leader) helpers
@@ -152,6 +164,8 @@ service cloud.firestore {
           // Leader: allow-listed fields, planning fields only while planning, never after teacher lock.
           (isLeader
             && changedTeamKeys.hasOnly(leaderTeamKeys())
+            && (!changedTeamKeys.hasAny(['teamName', 'mascot', 'teamSlogan', 'teamSetupComplete'])
+                || (before.status == 'WAITING' && teamBefore.get('teamSetupComplete', false) != true))
             && (!changedTeamKeys.hasAny(planningTeamKeys())
                 || (before.status in ['CARD_SELECT', 'IDEATION', 'AI_EVALUATION']
                     && (!('ideaLocked' in teamBefore) || teamBefore.ideaLocked != true)))

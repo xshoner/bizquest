@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import { decodeFirestoreFields, handleAiEvaluationRequest } from "./aiEvaluationHandler.js";
 import { withDerivedInvestments, isValidInvestmentRecord } from "../src/lib/game.js";
+import { onRequest } from "../functions/api/ai-evaluation.js";
 
 const PROJECT = "startup-5ec16";
 const OWNER = "teacherUid123";
@@ -145,6 +146,7 @@ async function run() {
     assert.equal(payload.evaluation.factors.F03.grade, "보통");
     assert.equal("F99" in payload.evaluation.factors, false);
     assert.equal(payload.evaluation.opinion, "좋은 출발입니다.");
+    assert.equal(fetchImpl.calls.length, 2, "only Firestore and Google Gemini are called");
     assert.match(fetchImpl.calls.prompt, /혼밥 메이트/);
     assert.match(fetchImpl.calls.prompt, /팀 B/, "other submitted teams appear in comparison context");
     assert.doesNotMatch(fetchImpl.calls.prompt, /팀 C \|/, "unsubmitted teams are excluded");
@@ -166,8 +168,42 @@ async function run() {
   assert.equal((await handleAiEvaluationRequest({ method: "POST", env, authorization: `Bearer ${teacherToken}`, rawBody: body("Z"), fetchImpl: mockFetch() })).status, 404);
 
   // Gemini failures surface as 502 so the client can fall back
+  {
+    const res = await handleAiEvaluationRequest({ method: 'POST', env, authorization: `Bearer ${teacherToken}`, rawBody: body(), fetchImpl: mockFetch({ geminiStatus: 400, geminiText: JSON.stringify({ error: { code: 400, message: 'API key not valid. Please pass a valid API key.', status: 'INVALID_ARGUMENT' } }) }) });
+    assert.equal(res.status, 502);
+    assert.match(res.body, /GEMINI_API_KEY/);
+    assert.match(res.body, /다시 배포/);
+    assert.doesNotMatch(res.body, /test-key/);
+    const trimmed = await handleAiEvaluationRequest({ method: 'POST', env: { ...env, GEMINI_API_KEY: ' test-key\n' }, authorization: `Bearer ${teacherToken}`, rawBody: body(), fetchImpl: mockFetch() });
+    assert.equal(trimmed.status, 200);
+  }
   assert.equal((await handleAiEvaluationRequest({ method: "POST", env, authorization: `Bearer ${teacherToken}`, rawBody: body(), fetchImpl: mockFetch({ geminiStatus: 401 }) })).status, 502);
   assert.equal((await handleAiEvaluationRequest({ method: "POST", env, authorization: `Bearer ${teacherToken}`, rawBody: body(), fetchImpl: mockFetch({ geminiText: "not json" }) })).status, 502);
+
+  // Cloudflare entry point forwards its secret binding and bearer token to the same handler.
+  {
+    const originalFetch = globalThis.fetch;
+    const fetchImpl = mockFetch();
+    globalThis.fetch = fetchImpl;
+    try {
+      const response = await onRequest({ env, request: new Request('https://bizquest.pages.dev/api/ai-evaluation', {
+        method: 'POST', headers: { Authorization: `Bearer ${teacherToken}` }, body: body()
+      }) });
+      assert.equal(response.status, 200);
+      assert.equal((await response.json()).evaluation.model, 'gemini-2.5-flash');
+      assert.equal(fetchImpl.calls.length, 2);
+      const get = await onRequest({ env, request: new Request('https://bizquest.pages.dev/api/ai-evaluation') });
+      assert.equal(get.status, 405);
+    } finally { globalThis.fetch = originalFetch; }
+  }
+
+  // Thinking parts must not corrupt the model's final JSON answer.
+  {
+    const completion = JSON.parse(geminiBody);
+    completion.candidates[0].content.parts.unshift({ thought: true, text: 'internal reasoning' });
+    const response = await handleAiEvaluationRequest({ method: 'POST', env, authorization: `Bearer ${teacherToken}`, rawBody: body(), fetchImpl: mockFetch({ geminiText: JSON.stringify(completion) }) });
+    assert.equal(response.status, 200);
+  }
 
   // Derived investments: budget/self-investment violations are ignored, totals computed on read
   {

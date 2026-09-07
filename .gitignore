@@ -14,3 +14,5 @@ Thumbs.db
 # tooling state
 .bkit/
 .wrangler/
+.local-tools/
+*-debug.log

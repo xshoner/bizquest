@@ -186,7 +186,7 @@ export function makeFallbackAiEvaluation(team, error) {
   }
   return {
     factors,
-    opinion: `렛서 AI 응답 문제로 기본 평가 기준을 적용했습니다. ${team?.idea?.serviceName || team?.idea?.product || "이 아이디어"}는 강점 지표를 살리고 취약 지표를 보완해야 합니다.`,
+    opinion: `Gemini 응답 문제로 기본 평가 기준을 적용했습니다. ${team?.idea?.serviceName || team?.idea?.product || "이 아이디어"}는 강점 지표를 살리고 취약 지표를 보완해야 합니다.`,
     evaluatedAt: Date.now(),
     model: AI_FALLBACK_MODEL_LABEL,
     errorMessage: String(error?.message || "unknown").slice(0, 240)

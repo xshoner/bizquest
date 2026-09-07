@@ -22,6 +22,16 @@ export const STATUS_LABELS = {
 
 export const C_LEVEL_KEYS = ["CEO", "CTO", "CFO", "CPO", "CMO", "CSO", "COO"];
 
+export const C_LEVEL_ROLES = {
+  CEO: { fullName: "Chief Executive Officer", description: "기업이나 조직의 전반적인 운영을 책임지고 전략적 의사 결정을 내리는 최고 경영자" },
+  CTO: { fullName: "Chief Technology Officer", description: "기업의 최고기술책임자로, 기술 전략 수립·연구개발 조직 관리 등을 총괄" },
+  CFO: { fullName: "Chief Financial Officer", description: "기업의 최고재무책임자로, 자금 조달·예산 수립·재무 관리와 재무 위험 관리를 총괄" },
+  CPO: { fullName: "Chief Product Officer", description: "기업의 최고제품책임자로, 고객의 요구를 바탕으로 제품 전략·기획·개발 방향과 사용자 경험을 총괄" },
+  CMO: { fullName: "Chief Marketing Officer", description: "기업의 최고마케팅책임자로, 시장 분석·브랜드 전략·홍보와 고객 확보를 총괄" },
+  CSO: { fullName: "Chief Strategy Officer", description: "기업의 최고전략책임자로, 중장기 경영 전략 수립·신사업 발굴과 성장 방향을 총괄" },
+  COO: { fullName: "Chief Operating Officer", description: "기업의 최고운영책임자로, 일상적인 사업 운영·조직 관리와 업무 프로세스 실행을 총괄" }
+};
+
 export const C_LEVEL_TYPES = [
   { key: "CEO", title: "비전을 현실로 만드는 리더", sub: "큰 그림을 보고 사람을 움직이는 능력이 강합니다. 방향을 정하고 팀에게 왜 해야 하는지 납득시키는 힘이 있습니다.", strength: "리더십, 비전 제시, 결단력", weakness: "세부 실행과 팀원 의견 수렴을 의식하면 더 강해집니다.", tags: ["리더십", "비전", "결단력"], jobs: ["스타트업 창업자", "학생회장", "프로젝트 매니저"] },
   { key: "CTO", title: "기술로 문제를 푸는 빌더", sub: "복잡한 문제를 논리적으로 분해하고 실제 결과물을 만드는 데 강합니다.", strength: "문제 해결, 기술 이해, 실행력", weakness: "사용자 관점과 비기술 팀원과의 소통을 보완하면 좋습니다.", tags: ["기술력", "논리", "실행"], jobs: ["개발자", "AI 연구원", "기술 공동창업자"] },
