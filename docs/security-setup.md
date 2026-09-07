@@ -107,7 +107,6 @@ Content-Type: application/json
 | 변수 | 위치 | 설명 |
 |---|---|---|
 | `GEMINI_API_KEY` | Cloudflare Pages → Settings → Environment variables / Netlify → Site settings → Environment variables | 필수 |
-| `GEMINI_MODEL` | 동일 | 선택, 기본값 `gemini-2.5-flash` |
 | `FIREBASE_PROJECT_ID` | 동일 | 선택, 기본값 `startup-5ec16` |
 
 로컬 `.env`는 절대 커밋하지 마세요(`.gitignore`에 포함).

@@ -297,11 +297,15 @@ function WaitingRoom({ room, uid }) {
   const selectedTeamKey = room.students?.[uid]?.team;
   const selectedTeam = room.teams?.[selectedTeamKey];
   const isLeader = selectedTeam?.leaderId === uid;
+  const [setupName, setSetupName] = useState(selectedTeam?.teamName || "");
+  const [selectedMascotId, setSelectedMascotId] = useState(selectedTeam?.mascot || "");
   const [slogan, setSlogan] = useState(selectedTeam?.teamSlogan || "");
 
   useEffect(() => {
+    setSetupName(selectedTeam?.teamName || "");
+    setSelectedMascotId(selectedTeam?.mascot || "");
     setSlogan(selectedTeam?.teamSlogan || "");
-  }, [selectedTeamKey, selectedTeam?.teamSlogan]);
+  }, [selectedTeamKey, selectedTeam?.teamName, selectedTeam?.mascot, selectedTeam?.teamSlogan]);
 
   async function selectTeam(teamKey) {
     if (busy) return;
@@ -318,23 +322,31 @@ function WaitingRoom({ room, uid }) {
     }
   }
 
-  async function updateTeamIdentity(patch, message) {
+  async function saveTeamSetup() {
+    const nextName = normalizeTeamName(setupName).slice(0, 30);
+    const nextSlogan = slogan.trim().slice(0, 40);
+    if (!nextName || !selectedMascotId || !nextSlogan) {
+      setError("팀 이름, 마스코트, 팀 구호를 모두 정해 주세요.");
+      return;
+    }
     if (!selectedTeamKey || !isLeader || busy) return;
+    setSetupName(nextName);
+    setSlogan(nextSlogan);
     setBusy(true);
     setError("");
     try {
-      await updateOwnTeam(room.ownerUid, room.roomId, selectedTeamKey, patch, message);
+      await updateOwnTeam(
+        room.ownerUid,
+        room.roomId,
+        selectedTeamKey,
+        { teamName: nextName, mascot: selectedMascotId, teamSlogan: nextSlogan, teamSetupComplete: true },
+        `${nextName} 팀 구성이 완료되었습니다.`
+      );
     } catch (err) {
       setError(writeErrorMessage(err));
     } finally {
       setBusy(false);
     }
-  }
-
-  async function saveSlogan() {
-    const nextSlogan = slogan.trim().slice(0, 40);
-    setSlogan(nextSlogan);
-    await updateTeamIdentity({ teamSlogan: nextSlogan }, nextSlogan ? `우리 팀 구호: ${nextSlogan}` : "팀 구호를 비웠습니다.");
   }
 
   return (
@@ -356,15 +368,19 @@ function WaitingRoom({ room, uid }) {
       {selectedTeam && (
         <section className="team-identity-setup">
           <div className="team-identity-heading">
-            <MascotAvatar mascotId={selectedTeam.mascot} size="large" />
-            <div><p>우리 회사 만들기</p><h3>마스코트와 팀 구호</h3></div>
+            <MascotAvatar mascotId={selectedMascotId || selectedTeam.mascot} size="large" />
+            <div><p>우리 회사 만들기</p><h3>팀 이름·마스코트·구호</h3></div>
           </div>
           {isLeader ? (
             <>
+              <label className="team-slogan-field team-name-field">
+                <span>팀 이름 <b>{setupName.length}/30</b></span>
+                <input value={setupName} maxLength={30} onChange={(event) => setSetupName(event.target.value)} placeholder="우리 회사의 팀 이름" />
+              </label>
               <p className="team-identity-guide">팀을 표현하는 마스코트를 하나 골라 주세요.</p>
               <div className="mascot-picker" role="list" aria-label="회사 마스코트 선택">
                 {TEAM_MASCOTS.map((mascot) => (
-                  <button key={mascot.id} type="button" disabled={busy} className={selectedTeam.mascot === mascot.id ? "selected" : ""} onClick={() => updateTeamIdentity({ mascot: mascot.id }, `${selectedTeam.teamName}의 마스코트가 정해졌습니다.`)} title={mascot.name}>
+                  <button key={mascot.id} type="button" disabled={busy} className={selectedMascotId === mascot.id ? "selected" : ""} onClick={() => setSelectedMascotId(mascot.id)} title={mascot.name}>
                     <MascotAvatar mascotId={mascot.id} size="medium" />
                     <span>{mascot.name}</span>
                   </button>
@@ -372,9 +388,9 @@ function WaitingRoom({ room, uid }) {
               </div>
               <label className="team-slogan-field">
                 <span>팀 구호 만들기 <b>{slogan.length}/40</b></span>
-                <input value={slogan} maxLength={40} onChange={(event) => setSlogan(event.target.value)} onKeyDown={(event) => event.key === "Enter" && saveSlogan()} placeholder="예: 아이디어를 현실로, 우리는 할 수 있다!" />
+                <input value={slogan} maxLength={40} onChange={(event) => setSlogan(event.target.value)} onKeyDown={(event) => event.key === "Enter" && saveTeamSetup()} placeholder="예: 아이디어를 현실로, 우리는 할 수 있다!" />
               </label>
-              <button type="button" disabled={busy} onClick={saveSlogan} className="team-slogan-save">{busy ? "저장 중..." : "팀 구호 저장"}</button>
+              <button type="button" disabled={busy} onClick={saveTeamSetup} className="team-slogan-save">{busy ? "저장 중..." : "팀 구성 저장하기"}</button>
             </>
           ) : (
             <div className="team-identity-readonly">

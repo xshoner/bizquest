@@ -1556,13 +1556,19 @@ function TeamGrid({ roomStatus, teams, students, onOpenStudentMenu, onRenameTeam
           return (
             <section key={key} className="rounded-lg bg-white p-4 shadow-lift">
               <div className="admin-team-identity">
-                <MascotAvatar mascotId={team.mascot} size="large" />
-                <div className="admin-team-identity-copy">
+                <div className="admin-team-main-row">
+                  <MascotAvatar mascotId={team.mascot} size="large" />
                   <input key={`${key}-${team.teamName}`} defaultValue={team.teamName} onBlur={(event) => onRenameTeam(key, event.target.value)} className="min-w-0 w-full rounded-lg border border-transparent bg-slate-50 px-3 py-2 text-lg font-black focus:border-indigo-500 focus:outline-none" />
-                  <p title={team.teamSlogan || ""}>{team.teamSlogan ? `“${team.teamSlogan}”` : "팀 구호를 기다리는 중"}</p>
                 </div>
-                <span className="team-member-count" title="현재 팀 인원"><Users size={14} /> 총 {members.length}명</span>
-                <button title="팀 삭제" onClick={() => onDeleteTeam(key)} className="print:hidden touch-button grid w-12 place-items-center rounded-lg bg-rose-50 text-rose-600"><Trash2 size={18} /></button>
+                <div className="admin-team-meta-row">
+                  <span className="team-member-count" title="현재 팀 인원"><Users size={14} /> 총 {members.length}명</span>
+                  {team.teamSetupComplete && <span className="team-setup-complete"><CheckCircle2 size={13} /> 팀구성 완료</span>}
+                  <button title="팀 삭제" onClick={() => onDeleteTeam(key)} className="print:hidden admin-team-delete touch-button"><Trash2 size={17} /> 삭제</button>
+                </div>
+                <p className={`admin-team-slogan ${team.teamSlogan ? "" : "admin-team-slogan-empty"}`}>
+                  <span>팀 구호</span>
+                  <strong>{team.teamSlogan || "아직 팀 구호를 정하지 않았습니다."}</strong>
+                </p>
               </div>
               {diversity && (
                 <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -1575,16 +1581,19 @@ function TeamGrid({ roomStatus, teams, students, onOpenStudentMenu, onRenameTeam
               )}
               <div className="mt-3 flex flex-wrap gap-2">
                 {members.map((student) => {
-                  const pendingDiagnosis = roomStatus === STATUSES.C_LEVEL && !student.cLevelResult?.key;
+                  const diagnosisInProgress = roomStatus === STATUSES.C_LEVEL && !student.cLevelResult?.key;
+                  const diagnosisComplete = roomStatus === STATUSES.C_LEVEL && Boolean(student.cLevelResult?.key);
                   const pendingInvestment = roomStatus === STATUSES.INVESTMENT && !student.investmentSubmitted;
                   const investmentDone = [STATUSES.INVESTMENT, STATUSES.SIMULATION, STATUSES.RESULT].includes(roomStatus) && student.investmentSubmitted;
                   return (
-                    <button key={student.uid} onClick={() => onOpenStudentMenu(student.uid, key)} className={`team-member-chip ${team.leaderId === student.uid ? "team-member-chip-leader" : ""} ${pendingDiagnosis || pendingInvestment ? "team-member-chip-pending" : ""}`} title={pendingDiagnosis ? "자가진단 미완료" : pendingInvestment ? "투자 미확정" : investmentDone ? "투자 확정" : undefined}>
+                    <button key={student.uid} onClick={() => onOpenStudentMenu(student.uid, key)} className={`team-member-chip ${team.leaderId === student.uid ? "team-member-chip-leader" : ""} ${pendingInvestment ? "team-member-chip-pending" : ""}`} title={diagnosisInProgress ? "자가진단 진행 중" : diagnosisComplete ? "자가진단 완료" : pendingInvestment ? "투자 미확정" : investmentDone ? "투자 확정" : undefined}>
                       {team.leaderId === student.uid && <Crown size={14} className="text-amber-500" />}
                       {student.nickname}
                       {student.cLevelResult?.key && <span className={`c-level-mini-badge c-level-mini-${student.cLevelResult.key}`}>{student.cLevelResult.key}</span>}
+                      {diagnosisInProgress && <span className="c-level-status-light c-level-status-progress" aria-label="자가진단 진행 중" />}
+                      {diagnosisComplete && <span className="c-level-status-light c-level-status-complete" aria-label="자가진단 완료" />}
                       {investmentDone && <CheckCircle2 size={13} className="text-emerald-600" aria-label="투자 확정" />}
-                      {(pendingDiagnosis || pendingInvestment) && <span className="team-member-pending-dot" aria-hidden="true" />}
+                      {pendingInvestment && <span className="team-member-pending-dot" aria-hidden="true" />}
                     </button>
                   );
                 })}

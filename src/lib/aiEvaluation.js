@@ -3,7 +3,7 @@
 import { BUSINESS_FACTORS } from "../data/gameData.js";
 
 export const AI_GRADES = ["양호", "보통", "취약"];
-export const AI_MODEL_LABEL = "gemini-2.5-pro-via-letsur";
+export const AI_MODEL_LABEL = "gemini-2.5-flash";
 export const AI_FALLBACK_MODEL_LABEL = `${AI_MODEL_LABEL}-fallback`;
 export const AI_QUALITY_CHECK_MODEL_LABEL = "student-plan-quality-check";
 

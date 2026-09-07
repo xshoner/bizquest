@@ -16,7 +16,7 @@ import {
 } from "../src/lib/aiEvaluation.js";
 
 const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
-const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash";
+const GEMINI_MODEL = "gemini-2.5-flash";
 const DEFAULT_FIREBASE_PROJECT_ID = "startup-5ec16";
 const GEMINI_TIMEOUT_MS = 45000;
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
@@ -127,7 +127,6 @@ export async function handleAiEvaluationRequest({ method, authorization, rawBody
 
   const geminiApiKey = env?.GEMINI_API_KEY;
   if (!geminiApiKey) return textResponse(500, "GEMINI_API_KEY environment variable is missing.");
-  const geminiModel = env?.GEMINI_MODEL || DEFAULT_GEMINI_MODEL;
   const projectId = env?.FIREBASE_PROJECT_ID || DEFAULT_FIREBASE_PROJECT_ID;
 
   const idToken = String(authorization || "").replace(/^Bearer\s+/i, "").trim();
@@ -172,7 +171,7 @@ export async function handleAiEvaluationRequest({ method, authorization, rawBody
 
   let gemini;
   try {
-    gemini = await callGemini({ apiKey: geminiApiKey, model: geminiModel, prompt, fetchImpl });
+    gemini = await callGemini({ apiKey: geminiApiKey, model: GEMINI_MODEL, prompt, fetchImpl });
   } catch (err) {
     return textResponse(504, `Gemini request failed: ${String(err?.message || err).slice(0, 200)}`);
   }

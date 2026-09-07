@@ -139,6 +139,7 @@ async function run() {
     assert.equal(res.status, 200, res.body);
     const payload = JSON.parse(res.body);
     assert.equal(payload.source, "gemini");
+    assert.equal(payload.evaluation.model, "gemini-2.5-flash");
     assert.equal(payload.evaluation.factors.F01.grade, "양호");
     assert.equal(payload.evaluation.factors.F02.grade, "취약");
     assert.equal(payload.evaluation.factors.F03.grade, "보통");
