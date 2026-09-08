@@ -113,6 +113,23 @@ async function callGemini({ apiKey, model, prompt, fetchImpl }) {
   }
 }
 
+function isRetryableGeminiFailure(response, responseText = "") {
+  if ([401, 403, 429].includes(response.status)) return true;
+  if (response.status >= 500 && response.status <= 599) return true;
+  return response.status === 400 && /API_KEY_INVALID|API key not valid/i.test(responseText);
+}
+
+export async function callGeminiWithFallback({ apiKeys, model, prompt, fetchImpl }) {
+  let lastResult;
+  for (let index = 0; index < apiKeys.length; index += 1) {
+    lastResult = await callGemini({ apiKey: apiKeys[index], model, prompt, fetchImpl });
+    if (lastResult.response.ok || !isRetryableGeminiFailure(lastResult.response, lastResult.responseText)) {
+      return { ...lastResult, attemptCount: index + 1, keyCount: apiKeys.length };
+    }
+  }
+  return { ...lastResult, attemptCount: apiKeys.length, keyCount: apiKeys.length };
+}
+
 /**
  * @param {object} input
  * @param {string} input.method
@@ -125,8 +142,10 @@ async function callGemini({ apiKey, model, prompt, fetchImpl }) {
 export async function handleAiEvaluationRequest({ method, authorization, rawBody, env, fetchImpl = fetch }) {
   if (method !== "POST") return textResponse(405, "Method Not Allowed");
 
-  const geminiApiKey = String(env?.GEMINI_API_KEY || "").trim();
-  if (!geminiApiKey) return textResponse(500, "GEMINI_API_KEY environment variable is missing.");
+  const geminiApiKeys = [env?.GEMINI_API_KEY, env?.GEMINI_API_KEY_2, env?.GEMINI_API_KEY_3]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+  if (!geminiApiKeys.length) return textResponse(500, "GEMINI_API_KEY environment variable is missing.");
   const projectId = env?.FIREBASE_PROJECT_ID || DEFAULT_FIREBASE_PROJECT_ID;
 
   const idToken = String(authorization || "").replace(/^Bearer\s+/i, "").trim();
@@ -171,14 +190,15 @@ export async function handleAiEvaluationRequest({ method, authorization, rawBody
 
   let gemini;
   try {
-    gemini = await callGemini({ apiKey: geminiApiKey, model: GEMINI_MODEL, prompt, fetchImpl });
+    gemini = await callGeminiWithFallback({ apiKeys: geminiApiKeys, model: GEMINI_MODEL, prompt, fetchImpl });
   } catch (err) {
     return textResponse(504, `Gemini request failed: ${String(err?.message || err).slice(0, 200)}`);
   }
   const { response, responseText } = gemini;
   const invalidApiKey = response.status === 400 && /API_KEY_INVALID|API key not valid/i.test(responseText);
   if (invalidApiKey || response.status === 401 || response.status === 403) {
-    return textResponse(502, `Gemini API key was rejected with ${response.status}. Cloudflare Pages의 Production 환경변수 GEMINI_API_KEY를 새 키로 저장하고 다시 배포하세요. 미리보기 주소는 Preview 환경도 확인하세요.`);
+    const failureCount = gemini.keyCount > 1 ? ` 키 ${gemini.keyCount}개 중 ${gemini.attemptCount}개 실패.` : "";
+    return textResponse(502, `Gemini API key was rejected with ${response.status}.${failureCount} Cloudflare Pages의 Production 환경변수 GEMINI_API_KEY를 새 키로 저장하고 다시 배포하세요. 미리보기 주소는 Preview 환경도 확인하세요.`);
   }
   if (!response.ok) {
     return textResponse(502, `Gemini responded with ${response.status}. ${responseText.slice(0, 300)}`);

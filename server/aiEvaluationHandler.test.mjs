@@ -93,6 +93,22 @@ function mockFetch({ firestoreStatus = 200, geminiStatus = 200, geminiText = gem
   return impl;
 }
 
+function mockFallbackFetch(firstStatus, firstText = "temporary failure", secondStatus = 200) {
+  const calls = [];
+  const impl = async (url, init = {}) => {
+    if (String(url).startsWith("https://firestore.googleapis.com/")) {
+      return new Response(JSON.stringify(roomDocument), { status: 200 });
+    }
+    const apiKey = init.headers["x-goog-api-key"];
+    calls.push(apiKey);
+    const status = apiKey === "primary-key" ? firstStatus : secondStatus;
+    const bodyText = apiKey === "primary-key" ? firstText : (status === 200 ? geminiBody : "secondary failure");
+    return new Response(bodyText, { status, headers: { "Content-Type": "application/json" } });
+  };
+  impl.geminiCalls = calls;
+  return impl;
+}
+
 const env = { GEMINI_API_KEY: "test-key", FIREBASE_PROJECT_ID: PROJECT };
 const body = (teamKey = "A") => JSON.stringify({ ownerUid: OWNER, roomId: "ABC123", teamKey });
 
@@ -179,6 +195,41 @@ async function run() {
   }
   assert.equal((await handleAiEvaluationRequest({ method: "POST", env, authorization: `Bearer ${teacherToken}`, rawBody: body(), fetchImpl: mockFetch({ geminiStatus: 401 }) })).status, 502);
   assert.equal((await handleAiEvaluationRequest({ method: "POST", env, authorization: `Bearer ${teacherToken}`, rawBody: body(), fetchImpl: mockFetch({ geminiText: "not json" }) })).status, 502);
+
+  // Quota, rejected/invalid keys and transient Gemini failures move to the next configured key.
+  for (const [status, responseText] of [
+    [429, "quota exceeded"],
+    [401, "unauthorized"],
+    [403, "forbidden"],
+    [400, JSON.stringify({ error: { message: "API_KEY_INVALID" } })],
+    [500, "internal error"],
+    [503, "temporarily unavailable"]
+  ]) {
+    const fetchImpl = mockFallbackFetch(status, responseText);
+    const fallbackEnv = { ...env, GEMINI_API_KEY: "primary-key", GEMINI_API_KEY_2: "secondary-key" };
+    const response = await handleAiEvaluationRequest({ method: "POST", env: fallbackEnv, authorization: `Bearer ${teacherToken}`, rawBody: body(), fetchImpl });
+    assert.equal(response.status, 200, `status ${status} should use the fallback key`);
+    assert.deepEqual(fetchImpl.geminiCalls, ["primary-key", "secondary-key"]);
+  }
+
+  // Ordinary 400 responses are request errors and must not consume another key.
+  {
+    const fetchImpl = mockFallbackFetch(400, "bad request");
+    const fallbackEnv = { ...env, GEMINI_API_KEY: "primary-key", GEMINI_API_KEY_2: "secondary-key" };
+    const response = await handleAiEvaluationRequest({ method: "POST", env: fallbackEnv, authorization: `Bearer ${teacherToken}`, rawBody: body(), fetchImpl });
+    assert.equal(response.status, 502);
+    assert.deepEqual(fetchImpl.geminiCalls, ["primary-key"]);
+  }
+
+  // If every key is rejected, the final key response and a safe attempt count are returned.
+  {
+    const fetchImpl = mockFallbackFetch(403, "primary rejected", 403);
+    const fallbackEnv = { ...env, GEMINI_API_KEY: "primary-key", GEMINI_API_KEY_2: "secondary-key" };
+    const response = await handleAiEvaluationRequest({ method: "POST", env: fallbackEnv, authorization: `Bearer ${teacherToken}`, rawBody: body(), fetchImpl });
+    assert.equal(response.status, 502);
+    assert.match(response.body, /키 2개 중 2개 실패/);
+    assert.doesNotMatch(response.body, /primary-key|secondary-key/);
+  }
 
   // Cloudflare entry point forwards its secret binding and bearer token to the same handler.
   {
