@@ -81,7 +81,7 @@ import heroBackgroundImage from "../images/landing-hero-ai-v2.webp";
 import processRoadmapImage from "../images/landing-process-roadmap.webp";
 import { AiEvaluationShowcase, EventCardVisual, FanfareOnResult, ResultFinalizingShowcase, ResultFireworks } from "../components/shared/Effects.jsx";
 import { AssetChangeSummary, AssetTrendChart, gradeClassName } from "../components/shared/AssetCharts.jsx";
-import { installAudioUnlock, playPivotTransition, playSimulationFinale, playWhoosh } from "../lib/audio.js";
+import { installAudioUnlock, playPhaseTransition, playPivotTransition, playSimulationFinale, playWhoosh } from "../lib/audio.js";
 import { MascotAvatar } from "../components/shared/MascotAvatar.jsx";
 import { PHASE_TIMER_PRESETS_MIN, PhaseTimerDisplay } from "../components/shared/PhaseTimer.jsx";
 import { buildFullCsv, buildRoomJson, downloadTextFile, safeFileName } from "../lib/exportReport.js";
@@ -587,8 +587,18 @@ export default function AdminPage() {
   const bgmRef = useRef(null);
   const resultBoardRef = useRef(null);
   const pivotResolvingRef = useRef(false);
+  const previousPhaseRef = useRef(null);
 
   useEffect(() => installAudioUnlock(), []);
+
+  useEffect(() => {
+    const nextStatus = room?.status;
+    if (!nextStatus) return;
+    if (previousPhaseRef.current && previousPhaseRef.current !== nextStatus && nextStatus !== STATUSES.RESULT) {
+      playPhaseTransition(nextStatus);
+    }
+    previousPhaseRef.current = nextStatus;
+  }, [room?.status]);
 
   useEffect(() => {
     if (!["voting", "ready"].includes(room?.pivotPhase)) { setPivotUiVisible(false); return undefined; }
@@ -916,6 +926,30 @@ export default function AdminPage() {
   }
 
   async function handlePhaseClick(status) {
+    if (status === STATUSES.IDEATION && room?.status === STATUSES.AI_EVALUATION) {
+      if (evaluating || room?.aiEvaluationStatus === "evaluating") {
+        await updateRoom({ sysMessage: "진행 중인 AI 평가가 끝난 뒤 사업계획 수립 단계로 돌아갈 수 있습니다." });
+        return;
+      }
+      const revisionPatch = {};
+      for (const [teamKey] of activeTeamEntries) {
+        revisionPatch[`teams.${teamKey}.ideaLocked`] = false;
+        revisionPatch[`teams.${teamKey}.ideaSubmitted`] = false;
+        revisionPatch[`teams.${teamKey}.aiEvaluation`] = null;
+      }
+      await updateRoom({
+        ...revisionPatch,
+        status: STATUSES.IDEATION,
+        phaseTimer: null,
+        aiEvaluationStatus: "revision",
+        aiEvaluationOwner: null,
+        aiEvaluationStartedAt: 0,
+        aiEvaluationHeartbeatAt: 0,
+        aiEvaluationProgress: { completed: 0, total: activeTeamEntries.length },
+        sysMessage: "사업계획 수정 단계로 돌아왔습니다. 모든 팀의 제출과 확정이 해제되었으며, 마지막 팀을 다시 확정하면 AI 재평가가 자동으로 시작됩니다."
+      });
+      return;
+    }
     if (status === STATUSES.AI_EVALUATION) {
       if (!allPlansSubmitted) {
         await evaluateBusinessPlans();
@@ -1247,6 +1281,11 @@ export default function AdminPage() {
       sysMessage: month >= SIMULATION_MONTHS ? `${SIMULATION_MONTHS}개월 경영 시뮬레이션이 종료되었습니다. 교사가 최종 결과 버튼을 누르면 결과가 공개됩니다.` : isPivotStop ? "12개월 차가 종료되었습니다. 모든 팀원이 미래를 바꿀 피벗 카드에 투표하세요." : `${month}개월 차 이벤트 자산 변동이 반영되었습니다.`
     });
   }
+
+  useEffect(() => {
+    if (room?.status !== STATUSES.IDEATION || room?.aiEvaluationStatus !== "revision" || !allPlansLocked || evaluating) return;
+    evaluateBusinessPlans();
+  }, [allPlansLocked, evaluating, room?.aiEvaluationStatus, room?.status]);
 
   async function resolveTeamPivot(teamKey, force = false) {
     const team = teams[teamKey];

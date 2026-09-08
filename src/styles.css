@@ -6271,7 +6271,7 @@ select {
   display: block !important;
   position: relative;
   min-width: 0;
-  height: 1.45em;
+  height: 1.9em;
   overflow: hidden;
   border-radius: 0 !important;
   padding: 2px 0 !important;
@@ -6280,14 +6280,15 @@ select {
 
 .admin-team-slogan-runner {
   position: absolute;
-  top: 0;
+  top: 50%;
   left: 0;
   width: max-content;
   white-space: nowrap;
   color: #334155;
   font-size: 12px;
-  line-height: 1.4;
+  line-height: 1.6;
   font-weight: 900;
+  translate: 0 -50%;
   animation: team-slogan-marquee 14s linear infinite;
   will-change: left, transform;
 }
@@ -6302,7 +6303,7 @@ select {
 .student-team-name-row strong { display: -webkit-box; min-width: 0; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; overflow-wrap: anywhere; line-height: 1.15; }
 
 @media (prefers-reduced-motion: reduce) {
-  .admin-team-slogan-runner { position: static; animation: none; }
+  .admin-team-slogan-runner { position: static; translate: none; animation: none; }
 }
 
 .admin-team-members {
@@ -6508,6 +6509,8 @@ select {
   background: rgba(255,255,255,.94);
   box-shadow: 0 10px 24px rgba(2,44,34,.2);
 }
+.report-board .investor-ranking-list strong { color: #0f172a; }
+.report-board .investor-ranking-list small { color: #475569; }
 .report-board .investor-ranking-list .investor-top-1 {
   border-color: #fcd34d;
   background: linear-gradient(135deg,#fff7d6,#fef3c7);
@@ -6577,5 +6580,27 @@ select {
   .report-top-team-card {
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
+  }
+}
+
+/* Keep the pivot decision window lower in the viewport while retaining a scroll-free fit. */
+.pivot-vote-modal {
+  height: min(66dvh, 570px);
+  max-height: 66dvh;
+  margin: 30dvh auto 0;
+}
+
+/* Mobile result assets must remain readable on a single line. */
+.student-result-screen .asset-change-summary strong {
+  font-size: clamp(12px, 3.7vw, 15px) !important;
+  letter-spacing: -0.045em;
+  white-space: nowrap;
+}
+
+@media (max-height: 620px) {
+  .pivot-vote-modal {
+    height: 67dvh;
+    max-height: 67dvh;
+    margin-top: 29dvh;
   }
 }

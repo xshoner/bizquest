@@ -29,7 +29,7 @@ import { AiEvaluationShowcase, EventCardVisual, ResultFinalizingShowcase, Result
 import { AssetChangeSummary, AssetTrendChart, gradeClassName } from "../components/shared/AssetCharts.jsx";
 import { MascotAvatar } from "../components/shared/MascotAvatar.jsx";
 import { TEAM_MASCOTS } from "../lib/mascots.js";
-import { installAudioUnlock, playPivotTransition } from "../lib/audio.js";
+import { installAudioUnlock, playPhaseTransition, playPivotTransition } from "../lib/audio.js";
 
 const BUDGET = INVESTMENT_BUDGET;
 
@@ -188,6 +188,7 @@ function PhaseTransition({ status }) {
 
   useEffect(() => {
     if (previous.current && previous.current !== status) {
+      playPhaseTransition(status);
       setVisibleStatus(status);
       const timer = window.setTimeout(() => setVisibleStatus(null), 3800);
       previous.current = status;
@@ -1342,7 +1343,7 @@ function Result({ room, student }) {
     return <section><ResultTabs tab={tab} setTab={setTab} /><StudentInvestorView room={room} student={student} investors={rankedInvestors} /></section>;
   }
   return (
-    <section>
+    <section className="student-result-screen">
       <ResultTabs tab={tab} setTab={setTab} />
       <h2 className="text-2xl font-black">최종 순위 및 사업 리포트</h2>
       <div className="student-result-insights">{insights.map((insight) => <article key={insight.label}><span>{insight.icon}</span><div><small>{insight.label}</small><strong>{insight.value} · 최종 {insight.rank}위</strong></div></article>)}</div>

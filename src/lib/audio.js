@@ -145,3 +145,33 @@ export function playPivotTransition() {
     });
   });
 }
+
+/** Crisp two-part cue for a real room phase change. */
+export function playPhaseTransition(status = "") {
+  withContext((ctx, now) => {
+    const phaseOffsets = {
+      WAITING: 0,
+      C_LEVEL: 20,
+      CARD_SELECT: 40,
+      IDEATION: 60,
+      AI_EVALUATION: 80,
+      INVESTMENT: 100,
+      SIMULATION: 120,
+      RESULT: 160
+    };
+    const base = 360 + Number(phaseOffsets[status] || 0);
+    [base, base * 1.5].forEach((frequency, index) => {
+      const oscillator = ctx.createOscillator();
+      const gain = ctx.createGain();
+      oscillator.type = index ? "sine" : "triangle";
+      oscillator.frequency.setValueAtTime(frequency, now + index * 0.13);
+      gain.gain.setValueAtTime(0.0001, now + index * 0.13);
+      gain.gain.exponentialRampToValueAtTime(index ? 0.13 : 0.17, now + index * 0.13 + 0.025);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + index * 0.13 + 0.38);
+      oscillator.connect(gain);
+      gain.connect(ctx.destination);
+      oscillator.start(now + index * 0.13);
+      oscillator.stop(now + index * 0.13 + 0.4);
+    });
+  });
+}
