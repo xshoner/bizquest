@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { calculateInvestmentPortfolio, getAssetChange, makePivotTeamPatch, rankInvestors, resolvePivotVote, applyRiskMultiplier } from "./game.js";
 import { PIVOT_SCENARIOS } from "../data/simulationSettings.js";
+import { SIMULATION_EVENTS } from "../data/gameData.js";
 
 const baseTeam = {
   teamId: "A",
@@ -46,4 +47,11 @@ test("시뮬레이션 누적 수익률은 출발 총액을 기준으로 계산�
   const change = getAssetChange({ initialCapital: 127_000_000, baseAsset: 100_000_000, currentAsset: 100_405_711 });
   assert.equal(change.delta, -26_594_289);
   assert.ok(Math.abs(change.rate - (-20.940385)) < 0.00001);
+});
+
+test("F15 성실성 등급과 관리자 배율이 전용 이벤트에 반영된다", () => {
+  const event = SIMULATION_EVENTS.find((item) => item.id === "E26");
+  const team = { ...baseTeam, aiEvaluation: { factors: { F15: { grade: "양호" } } } };
+  const affected = applyRiskMultiplier(team, event, { factorGradeMultipliers: { F15: { 양호: 1.5 } } }, 8);
+  assert.equal(affected.lastEventImpact.rate, 27);
 });

@@ -19,6 +19,34 @@ export function isPlanSubmitted(team) {
   return Boolean(team?.idea) && team?.ideaSubmitted !== false;
 }
 
+export function getBusinessPlanCharacterCount(team) {
+  const idea = team?.idea || {};
+  return [
+    idea.serviceName,
+    idea.problem,
+    ...(idea.customers || []),
+    idea.solution,
+    idea.product,
+    ...(idea.revenueModels || []),
+    ...(idea.marketingStrategies || []),
+    idea.tagline
+  ].map((value) => String(value || "").trim()).filter(Boolean).join(" ").replace(/\s+/gu, " ").length;
+}
+
+export function getPlanDiligenceAssessment(team) {
+  const length = getBusinessPlanCharacterCount(team);
+  const grade = length >= 1000 ? "양호" : length >= 500 ? "보통" : "취약";
+  return {
+    grade,
+    length,
+    reason: `사업계획서 전체 작성 분량이 ${length.toLocaleString("ko-KR")}자로 ${grade} 기준에 해당합니다.`
+  };
+}
+
+export function getEvaluationFactor(team, factorId) {
+  return team?.aiEvaluation?.factors?.[factorId] || (factorId === "F15" ? getPlanDiligenceAssessment(team) : null);
+}
+
 function getStudentPlanCoreParts(team) {
   return [
     team?.idea?.serviceName,
@@ -72,7 +100,7 @@ export function buildEvaluationPrompt(team, comparisonTeams = []) {
   return [
     "너는 청소년 창업 수업의 성장 중심 평가 위원이야.",
     "평가 대상은 전문 창업가가 아니라 아이디어를 처음 구체화하는 학생이다. 투자심사 수준의 완성도를 요구하지 말고, 학생이 표현한 가능성과 논리적 연결을 먼저 인정해.",
-    "아래 사업계획을 14가지 팩터(F01~F14)에 대해 각각 '양호', '보통', '취약' 중 하나로 판정해.",
+    "아래 사업계획을 15가지 팩터(F01~F15)에 대해 각각 '양호', '보통', '취약' 중 하나로 판정해. F15 사업계획서 성실성은 서버가 글자 수로 최종 확정하므로 나머지 팩터의 내용 평가에 집중해.",
     "판정 기준: '양호'는 아이디어와 팩터의 연결이 구체적이거나 강점이 보이는 경우, '보통'은 의미 있는 아이디어가 있으나 설명이 짧거나 보완 여지가 있는 경우, '취약'은 해당 팩터가 명백히 빠졌거나 서로 모순되거나 실제 위험이 뚜렷한 경우다.",
     "의미 있는 문장과 사업 아이디어가 확인되면 '보통'을 기본값으로 삼아라. 단지 설명이 짧거나 전문 용어가 없다는 이유만으로 '취약'을 주지 마라.",
     "모든 팩터를 같은 등급으로 기계적으로 채우지 말고, 각 팀의 고객·문제·해결책·수익·홍보 내용에 근거해 강점과 보완점을 분별력 있게 나눠라. 다른 팀과 등급 개수를 억지로 맞추지는 마라.",
@@ -118,7 +146,7 @@ export function normalizeAiEvaluation(raw, team) {
   }
 
   if (quality.valid) {
-    const weakFactors = BUSINESS_FACTORS.filter((factor) => factors[factor.id].grade === "취약");
+    const weakFactors = BUSINESS_FACTORS.filter((factor) => factor.id !== "F15" && factors[factor.id].grade === "취약");
     const maximumWeakFactors = quality.length >= 120 ? 3 : 5;
     weakFactors.slice(maximumWeakFactors).forEach((factor) => {
       factors[factor.id] = {
@@ -127,6 +155,8 @@ export function normalizeAiEvaluation(raw, team) {
       };
     });
   }
+
+  factors.F15 = getPlanDiligenceAssessment(team);
 
   return {
     factors,
@@ -144,6 +174,7 @@ export function makeClearlyInvalidAiEvaluation(team, reason) {
       reason: "사업계획 내용이 부족하거나 반복되어 의미를 판단하기 어려워 취약으로 판정했습니다."
     }
   ]));
+  factors.F15 = getPlanDiligenceAssessment(team);
   return {
     factors,
     opinion: `${team?.teamName || "이 팀"}의 입력은 ${reason} 문제·고객·해결 방법을 문장으로 보완하면 다시 평가받을 수 있습니다.`.slice(0, 160),
@@ -179,7 +210,7 @@ export function makeFallbackAiEvaluation(team, error) {
     if (factor.id === "F04" && hasAny("제품 판매", "포장", "배달", "푸드", "제조")) grade = "취약";
     if (factor.id === "F08" && hasAny("사람", "오프라인", "매장", "교육", "돌봄")) grade = "취약";
     if (factor.id === "F10" && hasAny("여행", "오프라인", "배달", "매장", "야외")) grade = "취약";
-    factors[factor.id] = {
+    factors[factor.id] = factor.id === "F15" ? getPlanDiligenceAssessment(team) : {
       grade,
       reason: `${factor.name} 관점에서 사업계획의 핵심 키워드를 기준으로 ${grade}로 판정했습니다.`
     };

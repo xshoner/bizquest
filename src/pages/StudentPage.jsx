@@ -18,8 +18,9 @@ import {
   TECH_CARDS,
   TREND_CARDS
 } from "../data/gameData.js";
-import { INVESTMENT_BUDGET, INVESTMENT_STEP, TEAM_BASE_ASSET, applyRiskMultiplier, buildResultInsights, calculateInvestmentPortfolio, formatWon, getAssetChange, getStudentsByTeam, getTeamBaseAsset, getTeamEntries, getTeamStartingCapital, makeStudent, normalizeTeamName, rankInvestors, rankTeams, sumInvestments } from "../lib/game.js";
+import { INVESTMENT_BUDGET, INVESTMENT_STEP, TEAM_BASE_ASSET, applyRiskMultiplier, buildResultInsights, calculateInvestmentPortfolio, formatWon, getAssetChange, getPivotScenario, getStudentsByTeam, getTeamBaseAsset, getTeamEntries, getTeamStartingCapital, makeStudent, normalizeTeamName, rankInvestors, rankTeams, sumInvestments } from "../lib/game.js";
 import { PIVOT_SCENARIOS } from "../data/simulationSettings.js";
+import { getEvaluationFactor } from "../lib/aiEvaluation.js";
 import { studentDocRef, useRoom } from "../hooks/useRoom.js";
 import { updateOwnStudent, updateOwnTeam } from "../lib/roomStore.js";
 import { getEventImage, getTechCardImage, getTrendCardImage } from "../lib/assets.js";
@@ -1120,10 +1121,10 @@ function PivotVote({ room, uid, student }) {
         <div className="pivot-card-viewport">
           <span className="pivot-scroll-arrow pivot-scroll-arrow-left" aria-hidden="true">‹</span>
           <div className="pivot-card-scroller" aria-label="피벗 카드 목록">
-            {scenarios.map((scenario) => {
+            {scenarios.map((scenario, index) => {
               const active = selected === scenario.id;
               return (
-                <button key={scenario.id} type="button" disabled={Boolean(savedVote || resolved)} onClick={() => setSelected(scenario.id)} className={`pivot-card ${active ? "pivot-card-selected" : ""}`}>
+                <button key={scenario.id} type="button" disabled={Boolean(savedVote || resolved)} onClick={() => setSelected(scenario.id)} className={`pivot-card pivot-card-tone-${index % 10} ${active ? "pivot-card-selected" : ""}`}>
                   <span className="pivot-card-icon">{scenario.icon}</span><small>{scenario.tone}</small><h3>{scenario.title}</h3><p>{scenario.summary}</p><dl><div><dt>즉시 효과</dt><dd>{pivotImmediateText(scenario)}</dd></div><div><dt>13~24개월</dt><dd>{pivotEffectText(scenario)}</dd></div></dl>{active && <b className="pivot-card-check"><Check size={16} /> 선택</b>}
                 </button>
               );
@@ -1213,7 +1214,7 @@ function StudentAiEvaluationReport({ team }) {
       <p className="mt-3 rounded-lg bg-indigo-50 p-3 text-sm font-bold leading-6 text-indigo-800">{evaluation?.opinion || "아직 평가 의견이 없습니다."}</p>
       <div className="mt-3 grid gap-2">
         {BUSINESS_FACTORS.map((factor) => {
-          const item = evaluation?.factors?.[factor.id];
+          const item = getEvaluationFactor(team, factor.id);
           return (
             <div key={factor.id} className="rounded-lg border border-slate-200 p-3 text-sm">
               <div className="flex items-center justify-between gap-2">
@@ -1309,6 +1310,21 @@ function RollingWon({ from, to, active, duration = 1500 }) {
   return <strong className={active ? "asset-number-rolling" : ""}>{formatWon(value)}</strong>;
 }
 
+function PivotResultBadge({ team, settings, compact = false }) {
+  const scenario = getPivotScenario(settings, team?.pivotScenarioId || team?.pivotModifiers?.scenarioId || team?.midDecision?.resolvedScenario);
+  if (!scenario) return null;
+  return (
+    <div className={`report-pivot-choice ${compact ? "report-pivot-choice-compact" : ""}`}>
+      <span>{scenario.icon}</span>
+      <div>
+        <small>12개월 피벗 전략</small>
+        <strong>{scenario.title}</strong>
+        {!compact && <em>{scenario.summary}<br />즉시: {pivotImmediateText(scenario)} · 이후: {pivotEffectText(scenario)}</em>}
+      </div>
+    </div>
+  );
+}
+
 function Result({ room, student }) {
   const [selected, setSelected] = useState(null);
   const [tab, setTab] = useState("company");
@@ -1329,6 +1345,7 @@ function Result({ room, student }) {
           <div className="rounded-lg bg-white/95 p-5">
             <p className="text-sm font-black text-amber-700">1위 팀</p>
             <h3 className="mt-1 text-4xl font-black text-slate-950">{winner.teamName}</h3>
+            <PivotResultBadge team={winner} settings={room.simulationSettings} />
             <AssetChangeSummary team={winner} featured className="mt-3" />
             <AssetTrendChart team={winner} size="compact" className="mt-4" />
           </div>
@@ -1360,6 +1377,7 @@ function Result({ room, student }) {
                 <small className="block text-[11px] font-black">{change.positive ? "▲ +" : "▼ "}{change.rate.toFixed(1)}%</small>
               </span>
             </div>
+            <PivotResultBadge team={team} settings={room.simulationSettings} />
             <AssetChangeSummary team={team} className="mt-2" />
             <div className="mt-2 flex flex-wrap gap-1">
               {getStudentsByTeam(room.students, team.key).map((member) => (
@@ -1370,7 +1388,7 @@ function Result({ room, student }) {
           );
         })}
       </div>
-      {selected && <ReportModal team={selected} members={getStudentsByTeam(room.students, selected.key)} onClose={() => setSelected(null)} />}
+      {selected && <ReportModal team={selected} settings={room.simulationSettings} members={getStudentsByTeam(room.students, selected.key)} onClose={() => setSelected(null)} />}
     </section>
   );
 }
@@ -1455,7 +1473,7 @@ function MultiChipGroup({ options, values = [], limit, allowCustom = false, disa
   );
 }
 
-function ReportModal({ team, members = [], onClose }) {
+function ReportModal({ team, settings, members = [], onClose }) {
   const change = getAssetChange(team);
   const profit = change.delta;
   return (
@@ -1463,6 +1481,7 @@ function ReportModal({ team, members = [], onClose }) {
       <div className="max-h-[86vh] w-full overflow-y-auto rounded-lg bg-white p-5 shadow-lift" onClick={(event) => event.stopPropagation()}>
         <h3 className="text-2xl font-black">{team.teamName} 성적표</h3>
         {team.idea?.serviceName && <p className="mt-1 text-sm font-bold text-indigo-700">{team.idea.serviceName}</p>}
+        <PivotResultBadge team={team} settings={settings} />
         <AssetChangeSummary team={team} featured className="mt-3" />
         <div className="mt-3 flex flex-wrap gap-2">
           {members.map((member) => (

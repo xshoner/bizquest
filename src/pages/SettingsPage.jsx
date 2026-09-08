@@ -380,8 +380,8 @@ export default function SettingsPage() {
         </section>
 
         <section className="settings-panel settings-panel-wide">
-          <h2><Settings size={20} /> 팩터별 등급 배율</h2>
-          <p className="settings-help">팩터마다 양호·보통·취약 결과의 반영 강도를 조정합니다.</p>
+          <h2><Settings size={20} /> AI 평가 팩터별 등급 배율</h2>
+          <p className="settings-help">F01~F15 각 평가 항목의 양호·보통·취약 결과가 경영 시뮬레이션에 반영되는 강도를 조정합니다.</p>
           <div className="settings-rate-table settings-factor-table">
             <div className="settings-rate-head"><b>팩터</b><b>양호</b><b>보통</b><b>취약</b></div>
             {BUSINESS_FACTORS.map((factor) => (

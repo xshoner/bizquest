@@ -82,6 +82,27 @@ export function playFanfare() {
   });
 }
 
+export function playSimulationFinale() {
+  withContext((ctx, now) => {
+    const chord = [261.63, 329.63, 392, 523.25];
+    chord.forEach((frequency, index) => {
+      const oscillator = ctx.createOscillator();
+      const gain = ctx.createGain();
+      oscillator.type = index % 2 ? "triangle" : "sine";
+      oscillator.frequency.setValueAtTime(frequency, now);
+      oscillator.frequency.exponentialRampToValueAtTime(frequency * 2, now + 1.35);
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(0.12, now + 0.12 + index * 0.03);
+      gain.gain.setValueAtTime(0.12, now + 0.75);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 1.65);
+      oscillator.connect(gain);
+      gain.connect(ctx.destination);
+      oscillator.start(now + index * 0.04);
+      oscillator.stop(now + 1.7);
+    });
+  });
+}
+
 export function playWhoosh() {
   withContext((ctx, now) => {
     const oscillator = ctx.createOscillator();

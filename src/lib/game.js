@@ -1,5 +1,6 @@
 import { SIMULATION_EVENTS, TEAM_KEYS } from "../data/gameData.js";
 import { PIVOT_SCENARIOS, mergeSimulationSettings } from "../data/simulationSettings.js";
+import { getEvaluationFactor } from "./aiEvaluation.js";
 
 export const TEAM_BASE_ASSET = 100000000;
 /** Length of the management simulation in months. */
@@ -295,7 +296,9 @@ export function getAssetChange(team) {
 /** Counts AI factor grades (양호/보통/취약) for a team. */
 export function countAiGrades(team) {
   const counts = { 양호: 0, 보통: 0, 취약: 0 };
-  for (const item of Object.values(team?.aiEvaluation?.factors || {})) {
+  const factors = [...Object.values(team?.aiEvaluation?.factors || {})];
+  if (!team?.aiEvaluation?.factors?.F15) factors.push(getEvaluationFactor(team, "F15"));
+  for (const item of factors) {
     if (item?.grade in counts) counts[item.grade] += 1;
   }
   return counts;

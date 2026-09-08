@@ -70,7 +70,7 @@ import {
   rankTeams
 } from "../lib/game.js";
 import { PIVOT_SCENARIOS } from "../data/simulationSettings.js";
-import { isFallbackEvaluation, makeFallbackAiEvaluation } from "../lib/aiEvaluation.js";
+import { getEvaluationFactor, isFallbackEvaluation, makeFallbackAiEvaluation } from "../lib/aiEvaluation.js";
 import { deleteRoomDeep, deleteTeamDeep, moveStudent, removeStudentDeep, resetRoomDeep } from "../lib/roomStore.js";
 import { useAppSettings } from "../lib/appSettings.js";
 import { roomDocRef, useRoom } from "../hooks/useRoom.js";
@@ -81,7 +81,7 @@ import heroBackgroundImage from "../images/landing-hero-ai-v2.webp";
 import processRoadmapImage from "../images/landing-process-roadmap.webp";
 import { AiEvaluationShowcase, EventCardVisual, FanfareOnResult, ResultFinalizingShowcase, ResultFireworks } from "../components/shared/Effects.jsx";
 import { AssetChangeSummary, AssetTrendChart, gradeClassName } from "../components/shared/AssetCharts.jsx";
-import { installAudioUnlock, playWhoosh } from "../lib/audio.js";
+import { installAudioUnlock, playSimulationFinale, playWhoosh } from "../lib/audio.js";
 import { MascotAvatar } from "../components/shared/MascotAvatar.jsx";
 import { PHASE_TIMER_PRESETS_MIN, PhaseTimerDisplay } from "../components/shared/PhaseTimer.jsx";
 import { buildFullCsv, buildRoomJson, downloadTextFile, safeFileName } from "../lib/exportReport.js";
@@ -579,6 +579,7 @@ export default function AdminPage() {
   const [pivotUiVisible, setPivotUiVisible] = useState(false);
   const simulationTimerRef = useRef(null); // next-month timer
   const applyTimerRef = useRef(null); // pending "apply event impact" timer
+  const terminalAudioTimerRef = useRef(null); // lets the month 12/24 event and BGM finish together
   const simulationActiveRef = useRef(false); // true while this tab drives the simulation
   const aiHeartbeatRef = useRef(null);
   const finalizeTimerRef = useRef(null);
@@ -949,6 +950,14 @@ export default function AdminPage() {
       });
       return;
     }
+    if (room?.currentEvent) {
+      await updateRoom({ sysMessage: "24개월 차 마지막 이벤트가 끝난 뒤 최종 결과를 공개할 수 있습니다." });
+      return;
+    }
+    if (terminalAudioTimerRef.current) {
+      window.clearTimeout(terminalAudioTimerRef.current);
+      terminalAudioTimerRef.current = null;
+    }
     stopSimulationBgm();
     const dilutionPatch = {};
     for (const [key, team] of Object.entries(room.teams || {})) {
@@ -1282,6 +1291,10 @@ export default function AdminPage() {
       window.clearTimeout(applyTimerRef.current);
       applyTimerRef.current = null;
     }
+    if (terminalAudioTimerRef.current) {
+      window.clearTimeout(terminalAudioTimerRef.current);
+      terminalAudioTimerRef.current = null;
+    }
   }
 
   /** Stops driving the simulation from this tab (does not touch Firestore). */
@@ -1293,6 +1306,10 @@ export default function AdminPage() {
     if (!keepPendingApply && applyTimerRef.current) {
       window.clearTimeout(applyTimerRef.current);
       applyTimerRef.current = null;
+    }
+    if (terminalAudioTimerRef.current) {
+      window.clearTimeout(terminalAudioTimerRef.current);
+      terminalAudioTimerRef.current = null;
     }
     simulationActiveRef.current = false;
     setSimulationRunning(false);
@@ -1386,7 +1403,14 @@ export default function AdminPage() {
         if (isLastMonth || isPivotMonth) {
           // Keep the pending apply timer so the final month's impact still lands.
           stopLocalSimulation({ keepPendingApply: true });
-          stopSimulationBgm();
+          terminalAudioTimerRef.current = window.setTimeout(() => {
+            terminalAudioTimerRef.current = null;
+            stopSimulationBgm();
+            if (isLastMonth) {
+              updateRoom({ currentEvent: null, currentEventApplied: true, sysMessage: `${SIMULATION_MONTHS}개월 경영 시뮬레이션이 종료되었습니다. 최종 결과를 공개해 주세요.` }).catch(() => {});
+              playSimulationFinale();
+            }
+          }, SIMULATION_EVENT_DELAY);
           return;
         }
         simulationTimerRef.current = window.setTimeout(advanceOneMonth, SIMULATION_EVENT_DELAY);
@@ -1628,7 +1652,7 @@ export default function AdminPage() {
       {opinionTeam && <AiOpinionModal team={opinionTeam} onClose={() => setOpinionTeam(null)} />}
       {studentMenu && <StudentManageModal menu={studentMenu} students={students} teams={teams} onClose={() => setStudentMenu(null)} onAssign={assignStudentToTeam} onKick={removeStudent} onMove={moveStudentToTeam} onSetLeader={setLeader} />}
       {room.aiEvaluationStatus === "evaluating" && <AiEvaluationShowcase />}
-      {room.status === STATUSES.SIMULATION && room.currentEvent && Number(room.currentMonth || 0) < SIMULATION_MONTHS && (!['voting', 'ready'].includes(room.pivotPhase) || !pivotUiVisible) && (
+      {room.status === STATUSES.SIMULATION && room.currentEvent && Number(room.currentMonth || 0) <= SIMULATION_MONTHS && (!['voting', 'ready'].includes(room.pivotPhase) || !pivotUiVisible) && (
         <AdminEventShowcase
           event={room.currentEvent}
           month={room.currentMonth || 0}
@@ -1649,6 +1673,17 @@ function getStudentOrigin(localNetworkHost) {
   return origin;
 }
 
+function getTeamGradientStyle(teamKey) {
+  const seed = [...String(teamKey || "team")].reduce((total, character) => total + character.charCodeAt(0) * 17, 0);
+  const hue = seed % 360;
+  const secondHue = (hue + 42) % 360;
+  const thirdHue = (hue + 86) % 360;
+  return {
+    "--team-gradient": `linear-gradient(135deg, hsl(${hue} 76% 42%), hsl(${secondHue} 82% 54%) 56%, hsl(${thirdHue} 88% 62%))`,
+    "--team-glow": `hsl(${secondHue} 78% 48% / 0.34)`
+  };
+}
+
 function TeamGrid({ roomStatus, teams, students, onOpenStudentMenu, onRenameTeam, onAddTeam, onDeleteTeam, onLockPlan, onOpenPlan, onOpenOpinion }) {
   return (
     <section className="admin-team-section">
@@ -1666,7 +1701,7 @@ function TeamGrid({ roomStatus, teams, students, onOpenStudentMenu, onRenameTeam
           });
           const diversity = team.diversity;
           return (
-            <section key={key} className={`admin-team-card admin-team-tone-${teamIndex % 6}`}>
+            <section key={key} className={`admin-team-card admin-team-tone-${teamIndex % 6}`} style={getTeamGradientStyle(key)}>
               <div className="admin-team-identity">
                 <div className="admin-team-main-row">
                   <div className="admin-team-avatar-column">
@@ -1683,7 +1718,14 @@ function TeamGrid({ roomStatus, teams, students, onOpenStudentMenu, onRenameTeam
                 </div>
                 <p className={`admin-team-slogan ${team.teamSlogan ? "" : "admin-team-slogan-empty"}`}>
                   <span>팀 구호</span>
-                  <strong>{team.teamSlogan || "아직 팀 구호를 정하지 않았습니다."}</strong>
+                  {team.teamSlogan ? (
+                    <span className="admin-team-slogan-viewport" aria-label={team.teamSlogan}>
+                      <span className="admin-team-slogan-track" aria-hidden="true">
+                        <strong>{team.teamSlogan}</strong>
+                        <strong>{team.teamSlogan}</strong>
+                      </span>
+                    </span>
+                  ) : <strong>아직 팀 구호를 정하지 않았습니다.</strong>}
                 </p>
               </div>
               {diversity && (
@@ -2017,7 +2059,7 @@ function AiEvaluationSummary({ team, onOpenOpinion }) {
           )}
           <div className="ai-factor-grid">
             {BUSINESS_FACTORS.map((factor) => {
-              const grade = evaluation.factors?.[factor.id]?.grade || "보통";
+              const grade = getEvaluationFactor(team, factor.id)?.grade || "보통";
               return (
                 <div key={factor.id} className="ai-factor-chip">
                   <span className="ai-factor-name">{factor.name}</span>
@@ -2124,7 +2166,7 @@ function AiOpinionModal({ team, onClose }) {
         <p className="mt-3 rounded-lg bg-indigo-50 p-4 text-sm font-bold leading-6 text-indigo-800">{evaluation?.opinion || "아직 평가 의견이 없습니다."}</p>
         <div className="mt-4 grid gap-2">
           {BUSINESS_FACTORS.map((factor) => {
-            const item = evaluation?.factors?.[factor.id];
+            const item = getEvaluationFactor(team, factor.id);
             return (
               <div key={factor.id} className="rounded-lg border border-slate-200 p-3 text-sm">
                 <div className="flex items-center justify-between gap-2"><b>{factor.name}</b><span className={`rounded-full px-3 py-1 text-xs font-black ${gradeClassName(item?.grade || "보통")}`}>{item?.grade || "보통"}</span></div>
@@ -2137,6 +2179,21 @@ function AiOpinionModal({ team, onClose }) {
       </article>
     </div>
   ), document.body);
+}
+
+function PivotReportBadge({ team, settings, compact = false }) {
+  const scenario = getPivotScenario(settings, team?.pivotScenarioId || team?.pivotModifiers?.scenarioId || team?.midDecision?.resolvedScenario);
+  if (!scenario) return null;
+  return (
+    <div className={`report-pivot-choice ${compact ? "report-pivot-choice-compact" : ""}`}>
+      <span>{scenario.icon}</span>
+      <div>
+        <small>12개월 피벗 전략</small>
+        <strong>{scenario.title}</strong>
+        {!compact && <em>{scenario.summary}<br />즉시: {pivotImmediateTextForReport(scenario)} · 이후: {pivotEffectTextForReport(scenario)}</em>}
+      </div>
+    </div>
+  );
 }
 
 function ResultBoard({ rankedTeams, rankedInvestors, teams, students, room }) {
@@ -2180,6 +2237,13 @@ function ResultBoard({ rankedTeams, rankedInvestors, teams, students, room }) {
 
       <InvestorRanking investors={rankedInvestors} />
 
+      <section className="result-pivot-summary">
+        <div className="result-analysis-heading"><span>PIVOT STRATEGY</span><h3>팀별 선택 피벗 카드</h3></div>
+        <div>
+          {rankedTeams.map((team) => <PivotReportBadge key={team.key} team={team} settings={room.simulationSettings} compact />)}
+        </div>
+      </section>
+
       {winner && (
         <article className="winner-report-card mt-5 overflow-hidden rounded-lg bg-gradient-to-br from-amber-300 via-orange-500 to-rose-600 p-1 shadow-[0_18px_45px_rgba(245,158,11,0.35)]">
           <div className="rounded-lg bg-white/95 p-5">
@@ -2189,6 +2253,7 @@ function ResultBoard({ rankedTeams, rankedInvestors, teams, students, room }) {
                 <h3 className="text-4xl font-black text-slate-950">{winner.teamName}</h3>
                 <p className="mt-2 text-base font-black text-indigo-700">{winner.idea?.serviceName || winner.idea?.product || "사업 아이디어"}</p>
                 {winner.idea?.tagline && <p className="mt-1 text-sm font-bold text-slate-500">“{winner.idea.tagline}”</p>}
+                <PivotReportBadge team={winner} settings={room.simulationSettings} />
                 <div className="mt-3 flex flex-wrap gap-2">
                   {winner.diversity && <span className={`diversity-badge diversity-badge-${winner.diversity.key}`}><Sparkles size={13} /> {winner.diversity.label} <b>{winner.diversity.rate > 0 ? "+" : ""}{winner.diversity.rate}%</b></span>}
                   <AiGradeTally team={winner} />
@@ -2221,7 +2286,7 @@ function ResultBoard({ rankedTeams, rankedInvestors, teams, students, room }) {
         {rankedTeams.map((team, index) => {
           const change = getAssetChange(team);
           const members = getStudentsByTeam(students, team.key);
-          const pivotScenario = getPivotScenario(room.simulationSettings, team.pivotScenarioId || team.midDecision?.resolvedScenario);
+          const pivotScenario = getPivotScenario(room.simulationSettings, team.pivotScenarioId || team.pivotModifiers?.scenarioId || team.midDecision?.resolvedScenario);
           return (
             <article key={team.key} className={`report-team-card ${index === 0 ? "report-team-card-winner" : ""}`}>
               <div className="report-team-head">
@@ -2239,7 +2304,7 @@ function ResultBoard({ rankedTeams, rankedInvestors, teams, students, room }) {
                 </div>
               </div>
 
-              {pivotScenario && <div className="report-pivot-choice"><span>{pivotScenario.icon}</span><div><small>12개월 피벗 전략</small><strong>{pivotScenario.title}</strong><em>{pivotEffectTextForReport(pivotScenario)}</em></div></div>}
+              {pivotScenario && <PivotReportBadge team={team} settings={room.simulationSettings} />}
 
               <AssetChangeSummary team={team} className="mt-4" />
 
@@ -2300,6 +2365,13 @@ function pivotEffectTextForReport(scenario) {
   return effects[scenario.id] || scenario.effectLabel || "";
 }
 
+function pivotImmediateTextForReport(scenario) {
+  if (scenario.id === "early_exit") return "현재 자산 동결";
+  if (Number(scenario.immediateRate || 0)) return `현재 자산 ${scenario.immediateRate > 0 ? "+" : ""}${scenario.immediateRate}%`;
+  const amount = Number(scenario.immediateAmount || 0);
+  return amount ? `${amount > 0 ? "+" : "-"}${formatWon(Math.abs(amount))}` : "즉시 비용 없음";
+}
+
 function InvestorRanking({ investors = [], compact = false, currentUid = "" }) {
   const top = investors.slice(0, compact ? 3 : 10);
   const myIndex = investors.findIndex((investor) => investor.uid === currentUid);
@@ -2352,5 +2424,5 @@ function makeAiEvaluationMessage(evaluations = {}) {
   if (fallbackCount > 0) {
     return `AI 평가 완료: Gemini 성공 ${aiSuccessCount}팀, 기본 평가 적용 ${fallbackCount}팀. 평가의견에서 실패 사유를 확인하세요.`;
   }
-  return `AI 사업계획서 평가가 완료되었습니다. 팀 패널에서 14개 지표와 1~2줄 종합의견을 확인하세요.`;
+  return `AI 사업계획서 평가가 완료되었습니다. 팀 패널에서 15개 지표와 1~2줄 종합의견을 확인하세요.`;
 }

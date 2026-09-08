@@ -119,7 +119,8 @@ export const BUSINESS_FACTORS = [
   { id: "F11", name: "초기 바이럴 가능성", description: "SNS나 입소문으로 홍보되기 좋은 아이템인가" },
   { id: "F12", name: "고객 유지력", description: "고객이 단골이 되어 재구매할 확률" },
   { id: "F13", name: "팀 운영 안정성", description: "핵심 인력 이탈이나 내부 갈등에도 사업을 유지할 수 있는가" },
-  { id: "F14", name: "지식재산권 방어력", description: "상표권, 디자인권, 저작권 등 법적 분쟁을 예방하고 대응할 수 있는가" }
+  { id: "F14", name: "지식재산권 방어력", description: "상표권, 디자인권, 저작권 등 법적 분쟁을 예방하고 대응할 수 있는가" },
+  { id: "F15", name: "사업계획서 성실성", description: "사업계획서 전체 작성 분량을 기준으로 아이디어를 충분히 구체화했는가" }
 ];
 
 export const SIMULATION_EVENTS = [
@@ -147,7 +148,8 @@ export const SIMULATION_EVENTS = [
   { id: "E22", title: "블랙컨슈머의 악의적인 허위 사실 유포", factor: "F02", description: "허위 정보가 퍼지면서 고객 신뢰와 트렌드 반응성이 시험대에 오릅니다.", rates: { 양호: 2, 보통: -5, 취약: -12 } },
   { id: "E23", title: "주요 타겟 고객층의 인구 통계학적 트렌드 변화", factor: "F02", description: "고객층 규모와 관심사가 변하면서 시장 적합성이 다시 평가됩니다.", rates: { 양호: 8, 보통: -2, 취약: -10 } },
   { id: "E24", title: "인근 대형 상권 활성화로 인한 유동인구 급증", factor: "F05", description: "주변 상권이 살아나며 온·오프라인 유입 기회가 늘어납니다.", rates: { 양호: 15, 보통: 7, 취약: -1 } },
-  { id: "E25", title: "초기 제품 제조 불량으로 인한 전량 리콜 사태", factor: "F06", description: "제품 품질 문제가 발생해 디지털 관리와 기술 대응 역량이 중요해집니다.", rates: { 양호: -5, 보통: -15, 취약: -30 } }
+  { id: "E25", title: "초기 제품 제조 불량으로 인한 전량 리콜 사태", factor: "F06", description: "제품 품질 문제가 발생해 디지털 관리와 기술 대응 역량이 중요해집니다.", rates: { 양호: -5, 보통: -15, 취약: -30 } },
+  { id: "E26", title: "투자사의 사업계획서 실사 평가", factor: "F15", description: "전문 투자사가 사업계획서의 구체성과 준비 수준을 검토해 후속 투자 여부를 결정합니다.", rates: { 양호: 18, 보통: 5, 취약: -12 } }
 ];
 
 export const TREND_CARDS = [
