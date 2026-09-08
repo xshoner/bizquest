@@ -37,8 +37,7 @@ service cloud.firestore {
 
     // ------------------------------------------------------------------ app-wide documents
     match /appSettings/{settingId} {
-      allow read: if signedIn();
-      allow write: if isTeacher();
+      allow read, write: if isTeacher();
     }
 
     match /teacherRegistry/{teacherUid} {

@@ -1,6 +1,6 @@
 # Cloudflare cache rules
 
-Use Cloudflare in front of the production domain and keep Firebase/Netlify as the origin. These rules are intended to reduce repeated origin reads for static assets and Firebase Storage media.
+Use Cloudflare Pages for the production domain and Firebase for realtime classroom data. These rules reduce repeated reads for static assets and Firebase Storage media.
 
 ## 1. Frontend static assets
 

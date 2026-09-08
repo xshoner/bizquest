@@ -25,7 +25,7 @@ function displayEmail(item) {
 export default function SettingsPage() {
   const authState = useTeacherAuth();
   const { settings, loading, error } = useAppSettings();
-  const [unlocked, setUnlocked] = useState(localStorage.getItem("bizquest-settings-unlocked") === "true");
+  const [unlocked, setUnlocked] = useState(sessionStorage.getItem("bizquest-settings-unlocked") === "true");
   const [passcode, setPasscode] = useState("");
   const [form, setForm] = useState(() => mergeAppSettings(settings));
   const [status, setStatus] = useState("");
@@ -47,16 +47,24 @@ export default function SettingsPage() {
   }, [settings]);
 
   useEffect(() => {
+    if (!loading && authState.loggedIn && !settings.adminPasscode) setUnlocked(true);
+  }, [authState.loggedIn, loading, settings.adminPasscode]);
+
+  useEffect(() => {
     setLocalUsers(readLocalTeacherRegistry());
     if (unlocked) loadTeacherUsers();
   }, [unlocked, authState.user?.uid]);
 
   function unlock() {
-    if (passcode.trim() !== String(settings.adminPasscode || DEFAULT_APP_SETTINGS.adminPasscode)) {
+    if (!settings.adminPasscode) {
+      setStatus("최초 관리자 패스코드를 설정하려면 먼저 교사 계정으로 로그인하세요.");
+      return;
+    }
+    if (passcode.trim() !== String(settings.adminPasscode)) {
       setStatus("관리자 비밀번호가 맞지 않습니다.");
       return;
     }
-    localStorage.setItem("bizquest-settings-unlocked", "true");
+    sessionStorage.setItem("bizquest-settings-unlocked", "true");
     setUnlocked(true);
     setStatus("");
   }
@@ -110,10 +118,21 @@ export default function SettingsPage() {
     setBusy(true);
     setStatus("");
     try {
-      const cleanPayload = JSON.parse(JSON.stringify({ ...mergeAppSettings(form), updatedAt: Date.now() }));
+      const nextPasscode = String(form.adminPasscode || "").trim();
+      if (nextPasscode.length < 6) throw new Error("관리자 패스코드는 6자리 이상으로 설정하세요.");
+      if (!settings.adminPasscodeChangedAt && nextPasscode === String(settings.adminPasscode || "")) {
+        throw new Error("초기 관리자 패스코드를 새 값으로 변경해야 합니다.");
+      }
+      if (!authState.user?.uid) throw new Error("관리자 설정을 저장하려면 교사 계정 로그인이 필요합니다.");
+      const cleanPayload = JSON.parse(JSON.stringify({
+        ...mergeAppSettings(form),
+        adminPasscode: nextPasscode,
+        adminPasscodeChangedAt: nextPasscode !== settings.adminPasscode || !settings.adminPasscodeChangedAt ? Date.now() : settings.adminPasscodeChangedAt,
+        updatedAt: Date.now()
+      }));
       delete cleanPayload.geminiApiKey;
       localStorage.setItem(LOCAL_APP_SETTINGS_KEY, JSON.stringify(cleanPayload));
-      if (authState.user?.uid) await setDoc(doc(db, ...APP_SETTINGS_PATH), cleanPayload).catch(() => {});
+      await setDoc(doc(db, ...APP_SETTINGS_PATH), cleanPayload);
       setForm(cleanPayload);
       setStatus("설정을 저장했습니다.");
     } catch (err) {
@@ -282,6 +301,9 @@ export default function SettingsPage() {
 
       {status && <div className="settings-status">{status}</div>}
       {error && <div className="settings-status settings-status-error">{error}</div>}
+      {!settings.adminPasscodeChangedAt && (
+        <div className="settings-status settings-status-error">보안을 위해 초기 관리자 패스코드를 6자리 이상의 새 값으로 변경한 뒤 설정을 저장하세요.</div>
+      )}
 
       <div className="settings-grid">
         <section className="settings-panel">
@@ -320,7 +342,7 @@ export default function SettingsPage() {
         <section className="settings-panel">
           <h2><Settings size={20} /> 기본 설정</h2>
           <label>관리자 비밀번호</label>
-          <input value={form.adminPasscode || ""} onChange={(event) => updateField("adminPasscode", event.target.value)} />
+          <input type="password" minLength={6} autoComplete="new-password" value={form.adminPasscode || ""} onChange={(event) => updateField("adminPasscode", event.target.value)} />
           <label>기본 방 제목</label>
           <input value={form.defaultRoomTitle || ""} onChange={(event) => updateField("defaultRoomTitle", event.target.value)} />
           <label>학생 접속 호스트</label>

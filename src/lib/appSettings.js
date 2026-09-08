@@ -1,9 +1,10 @@
 ﻿import { useEffect, useState } from "react";
-import { auth, db, doc, getDoc } from "../firebase.js";
+import { auth, db, doc, getDoc, onAuthStateChanged } from "../firebase.js";
 import { DEFAULT_SIMULATION_SETTINGS, mergeSimulationSettings } from "../data/simulationSettings.js";
 
 export const DEFAULT_APP_SETTINGS = {
-  adminPasscode: "7476",
+  adminPasscode: "",
+  adminPasscodeChangedAt: 0,
   defaultRoomTitle: "스타트업 히어로",
   studentOriginHost: "192.168.0.190",
   simulation: DEFAULT_SIMULATION_SETTINGS,
@@ -150,17 +151,18 @@ export function useAppSettings() {
 
   useEffect(() => {
     let mounted = true;
+    let requestId = 0;
 
-    async function loadSettings() {
+    async function loadSettings(user) {
+      const currentRequest = ++requestId;
       try {
-        if (!auth.currentUser) {
+        if (!user || user.isAnonymous) {
           setSettings(mergeAppSettings(readLocalAppSettings() || DEFAULT_APP_SETTINGS));
           setLoading(false);
           return;
         }
-        if (!mounted) return;
         const snapshot = await getDoc(doc(db, ...APP_SETTINGS_PATH));
-        if (!mounted) return;
+        if (!mounted || currentRequest !== requestId) return;
         const remoteSettings = snapshot.exists() ? snapshot.data() : {};
         const localSettings = readLocalAppSettings();
         setSettings(mergeAppSettings(newerSettings(localSettings, remoteSettings)));
@@ -172,9 +174,10 @@ export function useAppSettings() {
       }
     }
 
-    loadSettings();
+    const unsubscribe = onAuthStateChanged(auth, (user) => loadSettings(user));
     return () => {
       mounted = false;
+      unsubscribe();
     };
   }, []);
 

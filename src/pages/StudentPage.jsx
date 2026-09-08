@@ -1,7 +1,6 @@
 ﻿import { useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { Award, Check, CircleDollarSign, Crown, Lightbulb, Pencil, RotateCcw, Send } from "lucide-react";
+import { Award, Check, Crown, Lightbulb, Pencil, RotateCcw, Send } from "lucide-react";
 import { auth, onAuthStateChanged, setDoc, signInAnonymously } from "../firebase.js";
 import {
   C_LEVEL_KEYS,
@@ -18,20 +17,19 @@ import {
   TECH_CARDS,
   TREND_CARDS
 } from "../data/gameData.js";
-import { INVESTMENT_BUDGET, INVESTMENT_STEP, TEAM_BASE_ASSET, applyRiskMultiplier, buildResultInsights, calculateInvestmentPortfolio, formatWon, getAssetChange, getPivotScenario, getStudentsByTeam, getTeamBaseAsset, getTeamEntries, getTeamStartingCapital, makeStudent, normalizeTeamName, rankInvestors, rankTeams, sumInvestments } from "../lib/game.js";
-import { PIVOT_SCENARIOS } from "../data/simulationSettings.js";
-import { getEvaluationFactor } from "../lib/aiEvaluation.js";
+import { formatWon, getTeamBaseAsset, makeStudent, normalizeTeamName } from "../lib/game.js";
 import { studentDocRef, useRoom } from "../hooks/useRoom.js";
 import { updateOwnStudent, updateOwnTeam } from "../lib/roomStore.js";
-import { getEventImage, getTechCardImage, getTrendCardImage } from "../lib/assets.js";
+import { getTechCardImage, getTrendCardImage } from "../lib/assets.js";
 import { PhaseTimerDisplay } from "../components/shared/PhaseTimer.jsx";
-import { AiEvaluationShowcase, EventCardVisual, ResultFinalizingShowcase, ResultFireworks } from "../components/shared/Effects.jsx";
-import { AssetChangeSummary, AssetTrendChart, gradeClassName } from "../components/shared/AssetCharts.jsx";
+import { AiEvaluationShowcase, ResultFinalizingShowcase, ResultFireworks } from "../components/shared/Effects.jsx";
 import { MascotAvatar } from "../components/shared/MascotAvatar.jsx";
-import { TEAM_MASCOTS } from "../lib/mascots.js";
-import { installAudioUnlock, playPhaseTransition, playPivotTransition } from "../lib/audio.js";
-
-const BUDGET = INVESTMENT_BUDGET;
+import { installAudioUnlock, playPhaseTransition } from "../lib/audio.js";
+import StudentResult from "./student/ResultStage.jsx";
+import { Simulation as SimulationStage, StudentAiEvaluationReport } from "./student/SimulationStage.jsx";
+import PivotVoteStage from "./student/PivotVoteStage.jsx";
+import InvestmentStage from "./student/InvestmentStage.jsx";
+import WaitingRoomStage from "./student/WaitingRoomStage.jsx";
 
 const STALE_SCREEN_MESSAGE = "화면 정보가 오래되어 저장하지 못했습니다. 새로고침 버튼을 누르거나 다시 QR코드를 촬영하세요.";
 
@@ -168,16 +166,16 @@ export default function StudentPage() {
       <ResultFireworks status={room.status} />
       <StudentHeader room={room} uid={authUid} student={student} />
       {room.sysMessage && <div className="ticker-pulse mb-4 rounded-lg bg-indigo-50 px-4 py-3 text-sm font-bold text-indigo-700">{room.sysMessage}</div>}
-      {room.status === STATUSES.WAITING && <WaitingRoom room={room} uid={authUid} />}
+      {room.status === STATUSES.WAITING && <WaitingRoomStage room={room} uid={authUid} />}
       {room.status === STATUSES.C_LEVEL && <CLevelDiagnosis room={room} uid={authUid} student={student} />}
       {room.status === STATUSES.CARD_SELECT && <CardSelect room={room} uid={authUid} student={student} />}
       {room.status === STATUSES.IDEATION && <Ideation room={room} uid={authUid} student={student} />}
       {room.status === STATUSES.AI_EVALUATION && <AiEvaluation room={room} student={student} />}
       {[STATUSES.INVESTMENT, STATUSES.SIMULATION, STATUSES.RESULT].includes(room.status) && <TeamFundingSummary room={room} student={student} />}
-      {room.status === STATUSES.INVESTMENT && <Investment room={room} uid={authUid} student={student} />}
-      {room.status === STATUSES.SIMULATION && <Simulation room={room} student={student} />}
-      {room.status === STATUSES.SIMULATION && ["voting", "ready"].includes(room.pivotPhase) && <PivotVote room={room} uid={authUid} student={student} />}
-      {room.status === STATUSES.RESULT && <Result room={room} student={student} />}
+      {room.status === STATUSES.INVESTMENT && <InvestmentStage room={room} uid={authUid} student={student} />}
+      {room.status === STATUSES.SIMULATION && <SimulationStage room={room} student={student} />}
+      {room.status === STATUSES.SIMULATION && ["voting", "ready"].includes(room.pivotPhase) && <PivotVoteStage room={room} uid={authUid} student={student} />}
+      {room.status === STATUSES.RESULT && <StudentResult room={room} student={student} />}
     </MobileFrame>
   );
 }
@@ -301,121 +299,6 @@ function StudentHeader({ room, uid, student }) {
     </header>
   );
 }
-function WaitingRoom({ room, uid }) {
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const selectedTeamKey = room.students?.[uid]?.team;
-  const selectedTeam = room.teams?.[selectedTeamKey];
-  const teamLocked = selectedTeam?.teamSetupComplete === true;
-  const isLeader = selectedTeam?.leaderId === uid;
-  const [setupName, setSetupName] = useState(selectedTeam?.teamName || "");
-  const [selectedMascotId, setSelectedMascotId] = useState(selectedTeam?.mascot || "");
-  const [slogan, setSlogan] = useState(selectedTeam?.teamSlogan || "");
-
-  useEffect(() => {
-    setSetupName(selectedTeam?.teamName || "");
-    setSelectedMascotId(selectedTeam?.mascot || "");
-    setSlogan(selectedTeam?.teamSlogan || "");
-  }, [selectedTeamKey, selectedTeam?.teamName, selectedTeam?.mascot, selectedTeam?.teamSlogan]);
-
-  async function selectTeam(teamKey) {
-    if (busy || teamLocked || room.teams?.[teamKey]?.teamSetupComplete) return;
-    const currentTeam = room.students?.[uid]?.team;
-    const nextTeam = currentTeam === teamKey ? null : teamKey;
-    setBusy(true);
-    setError("");
-    try {
-      await updateOwnStudent(room.ownerUid, room.roomId, uid, { team: nextTeam });
-    } catch (err) {
-      setError(writeErrorMessage(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function saveTeamSetup() {
-    const nextName = normalizeTeamName(setupName).slice(0, 10);
-    const nextSlogan = slogan.trim().slice(0, 40);
-    if (!nextName || !selectedMascotId || !nextSlogan) {
-      setError("팀 이름, 마스코트, 팀 구호를 모두 정해 주세요.");
-      return;
-    }
-    if (!selectedTeamKey || !isLeader || busy || teamLocked) return;
-    setSetupName(nextName);
-    setSlogan(nextSlogan);
-    setBusy(true);
-    setError("");
-    try {
-      await updateOwnTeam(
-        room.ownerUid,
-        room.roomId,
-        selectedTeamKey,
-        { teamName: nextName, mascot: selectedMascotId, teamSlogan: nextSlogan, teamSetupComplete: true },
-        `${nextName} 팀 구성이 완료되었습니다.`
-      );
-    } catch (err) {
-      setError(writeErrorMessage(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <section>
-      <h2 className="text-2xl font-black">{teamLocked ? "우리 팀 구성이 완료되었습니다" : "팀을 선택하세요"}</h2>
-      {teamLocked && <p className="mt-2 text-sm text-slate-600">팀 변경은 관리자만 할 수 있습니다.</p>}
-      <ErrorBanner message={error} onDismiss={() => setError("")} />
-      <div className="mt-4 grid grid-cols-2 gap-3">
-        {getTeamEntries(room.teams).filter(([key]) => !teamLocked || key === selectedTeamKey).map(([key, team]) => {
-          const count = Object.values(room.students || {}).filter((member) => member.team === key).length;
-          const selected = room.students?.[uid]?.team === key;
-          return (
-            <button key={key} disabled={busy || teamLocked || team.teamSetupComplete} onClick={() => selectTeam(key)} className={`touch-button rounded-lg p-4 text-left shadow-lift disabled:cursor-not-allowed ${selected ? "selected-team-card text-white" : "bg-white text-slate-900"}`}>
-              <div className="waiting-team-title"><MascotAvatar mascotId={team.mascot} size="small" /><p className="break-keep text-xl font-black">{team.teamName}</p></div>
-              <p className={`mt-1 text-sm ${selected ? "text-white/85" : "text-slate-500"}`}>{count}명 참여{team.teamSetupComplete ? " · 구성 완료" : selected ? " · 선택됨" : ""}</p>
-            </button>
-          );
-        })}
-      </div>
-      {selectedTeam && (
-        <section className="team-identity-setup">
-          <div className="team-identity-heading">
-            <MascotAvatar mascotId={selectedMascotId || selectedTeam.mascot} size="large" />
-            <div><p>우리 회사 만들기</p><h3>팀 이름·마스코트·구호</h3></div>
-          </div>
-          {isLeader && !teamLocked ? (
-            <>
-              <label className="team-slogan-field team-name-field">
-                <span>기업명 <b>{setupName.length}/10</b></span>
-                <input value={setupName} maxLength={10} onChange={(event) => setSetupName(event.target.value)} placeholder="10자 이내 기업명" />
-              </label>
-              <p className="team-identity-guide">팀을 표현하는 마스코트를 하나 골라 주세요.</p>
-              <div className="mascot-picker" role="list" aria-label="회사 마스코트 선택">
-                {TEAM_MASCOTS.map((mascot) => (
-                  <button key={mascot.id} type="button" disabled={busy} className={selectedMascotId === mascot.id ? "selected" : ""} onClick={() => setSelectedMascotId(mascot.id)} title={mascot.name}>
-                    <MascotAvatar mascotId={mascot.id} size="medium" />
-                    <span>{mascot.name}</span>
-                  </button>
-                ))}
-              </div>
-              <label className="team-slogan-field">
-                <span>팀 구호 만들기 <b>{slogan.length}/40</b></span>
-                <input value={slogan} maxLength={40} onChange={(event) => setSlogan(event.target.value)} onKeyDown={(event) => event.key === "Enter" && saveTeamSetup()} placeholder="예: 아이디어를 현실로, 우리는 할 수 있다!" />
-              </label>
-              <button type="button" disabled={busy} onClick={saveTeamSetup} className="team-slogan-save">{busy ? "저장 중..." : "팀 구성 저장하기"}</button>
-            </>
-          ) : (
-            <div className="team-identity-readonly">
-              <strong>{selectedTeam.teamSlogan || "아직 팀 구호를 정하지 않았어요."}</strong>
-              <span>{teamLocked ? "팀 구성이 완료되었습니다. 변경이 필요하면 관리자에게 요청하세요." : "팀장이 마스코트와 구호를 정할 수 있습니다."}</span>
-            </div>
-          )}
-        </section>
-      )}
-    </section>
-  );
-}
-
 function CLevelDiagnosis({ room, uid, student }) {
   const savedResult = student.cLevelResult;
   const [started, setStarted] = useState(Boolean(savedResult));
@@ -918,115 +801,6 @@ function TeamFundingSummary({ room, student }) {
   );
 }
 
-function Investment({ room, uid, student }) {
-  const availableTeams = getTeamEntries(room.teams).filter(([key]) => key !== student.team);
-  const availableKeys = availableTeams.map(([key]) => key);
-  const [investments, setInvestments] = useState(() => pickInvestments(student.investments, availableKeys));
-  const [directInputTeam, setDirectInputTeam] = useState(null);
-  const [expandedTeam, setExpandedTeam] = useState(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const [limitHint, setLimitHint] = useState("");
-  const total = sumInvestments(investments);
-  const submitted = Boolean(student.investmentSubmitted);
-
-  useEffect(() => {
-    setInvestments(pickInvestments(student.investments, availableKeys));
-  }, [student.investments, availableKeys.join("|")]);
-
-  async function submit() {
-    if (busy) return;
-    if (total > BUDGET) {
-      setError(`투자 총액이 예산(${formatWon(BUDGET)})을 초과했습니다.`);
-      return;
-    }
-    setBusy(true);
-    setError("");
-    try {
-      // Write only our own record. Team totals are derived on read by every client, so no other
-      // student's investment can be overwritten here.
-      await updateOwnStudent(room.ownerUid, room.roomId, uid, {
-        investments: pickInvestments(investments, availableKeys),
-        investmentSubmitted: true
-      });
-    } catch (err) {
-      setError(writeErrorMessage(err, "투자를 저장하지 못했습니다. 다시 시도하세요."));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  function setAmount(teamKey, amount) {
-    const sanitized = Math.max(0, Math.min(BUDGET, Math.round(Number(amount || 0) / INVESTMENT_STEP) * INVESTMENT_STEP));
-    const next = { ...investments, [teamKey]: sanitized };
-    const nextTotal = sumInvestments(next);
-    if (nextTotal <= BUDGET) {
-      setInvestments(next);
-      setLimitHint("");
-      return;
-    }
-    // Clamp to the remaining budget instead of silently ignoring the change.
-    const remaining = Math.max(0, BUDGET - (total - Number(investments[teamKey] || 0)));
-    setInvestments({ ...investments, [teamKey]: remaining });
-    setLimitHint(`잔여 투자금이 부족해 ${formatWon(remaining)}으로 조정했습니다.`);
-  }
-
-  return (
-    <section>
-      <h2 className="text-2xl font-black">가상 투자</h2>
-      <div className="mt-3 rounded-lg bg-slate-900 p-4 text-white">
-        <p className="text-sm text-slate-300">잔여 투자금</p>
-        <p className="text-3xl font-black">{formatWon(BUDGET - total)}</p>
-      </div>
-      <div className="mt-3 rounded-lg bg-indigo-50 px-4 py-3 text-sm font-black leading-6 text-indigo-700 ring-1 ring-indigo-100">
-        <p>우리 팀 사업에는 투자할 수 없습니다.</p>
-        <p>상대팀 사업내용을 보고 투자하세요.</p>
-      </div>
-      {submitted && <div className="ticker-pulse mt-3 rounded-lg bg-rose-50 px-4 py-3 text-sm font-black text-rose-700">투자 완료. 금액을 바꾸고 다시 누르면 재확정됩니다.</div>}
-      {limitHint && <div className="mt-3 rounded-lg bg-amber-50 px-4 py-3 text-sm font-bold text-amber-700 ring-1 ring-amber-200">{limitHint}</div>}
-      <ErrorBanner message={error} onDismiss={() => setError("")} />
-      <div className="mt-4 space-y-3">
-        {availableTeams.map(([key, team]) => {
-          const expanded = expandedTeam === key;
-          return (
-            <article key={key} className="rounded-lg bg-white p-4 shadow-lift">
-              <p className="text-sm font-bold text-indigo-600">{team.teamName}</p>
-              <h3 className="mt-1 text-lg font-black">{team.idea?.product || team.idea?.solution || team.techCard?.title || "아이디어 준비 중"}</h3>
-              <p className="mt-2 text-sm text-slate-500">{team.idea?.problem || team.trendCard?.title || "팀 발표를 듣고 투자하세요."}</p>
-              <button type="button" onClick={() => setExpandedTeam(expanded ? null : key)} className="touch-button mt-3 w-full rounded-lg bg-indigo-50 px-3 py-2 text-sm font-black text-indigo-700">
-                {expanded ? "사업 내용 및 AI 평가 접기" : "사업 내용 및 AI 평가 보기"}
-              </button>
-              {expanded && <InvestmentTeamDetails team={team} />}
-              <div className="mt-4 flex items-center gap-3">
-                <input type="range" min="0" max={BUDGET} step={INVESTMENT_STEP} value={investments[key] || 0} onChange={(event) => setAmount(key, event.target.value)} aria-label={`${team.teamName} 투자 금액`} className="w-full accent-indigo-600" />
-                <span className="w-20 text-right text-sm font-black">{formatWon(investments[key] || 0)}</span>
-              </div>
-              <button type="button" onClick={() => setDirectInputTeam(directInputTeam === key ? null : key)} className="touch-button mt-3 w-full rounded-lg bg-slate-100 px-3 py-2 text-sm font-black text-slate-700">직접 입력</button>
-              {directInputTeam === key && (
-                <div className="mt-3 flex items-center gap-2 rounded-lg bg-slate-50 p-3">
-                  <input type="number" inputMode="numeric" min="0" max={BUDGET} step={INVESTMENT_STEP} value={investments[key] || 0} onChange={(event) => setAmount(key, event.target.value)} aria-label={`${team.teamName} 투자 금액 직접 입력`} className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-3 text-right font-black outline-none focus:border-indigo-500" />
-                  <span className="text-sm font-bold text-slate-500">원</span>
-                </div>
-              )}
-            </article>
-          );
-        })}
-      </div>
-      <button disabled={busy} onClick={submit} className={`touch-button mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg px-4 py-4 text-lg font-black text-white disabled:opacity-60 ${submitted ? "bg-rose-600" : "bg-emerald-600"}`}><CircleDollarSign size={20} /> {busy ? "저장 중..." : submitted ? "투자 재확정" : "투자 확정"}</button>
-    </section>
-  );
-}
-
-/** Keeps only investments into teams the student may invest in (drops own team / deleted teams). */
-function pickInvestments(investments, allowedKeys) {
-  const result = {};
-  for (const key of allowedKeys) {
-    const value = Number(investments?.[key] || 0);
-    if (value > 0) result[key] = value;
-  }
-  return result;
-}
-
 function AiEvaluation({ room, student }) {
   const team = room.teams?.[student.team];
   if (room.aiEvaluationStatus !== "evaluating" && !team?.aiEvaluation) {
@@ -1054,378 +828,8 @@ function AiEvaluation({ room, student }) {
   );
 }
 
-function InvestmentTeamDetails({ team }) {
-  const idea = team.idea || {};
-  return (
-    <div className="mt-3 rounded-lg bg-slate-50 p-3">
-      <div className="space-y-2 text-sm leading-6 text-slate-700">
-        <p><b>제품 및 서비스명:</b> {idea.serviceName || "-"}</p>
-        <p><b>트렌드:</b> {team.trendCard?.title || "미선택"}</p>
-        <p><b>기술카드:</b> {team.techCard?.title || "미선택"}</p>
-        <p><b>문제정의:</b> {idea.problem || "-"}</p>
-        <p><b>고객정의:</b> {(idea.customers || []).join(", ") || "-"}</p>
-        <p><b>제품/서비스:</b> {idea.product || idea.solution || "-"}</p>
-        <p><b>수익모델:</b> {(idea.revenueModels || []).join(", ") || "-"}</p>
-        <p><b>마케팅:</b> {(idea.marketingStrategies || []).join(", ") || "-"}</p>
-      </div>
-      {team.aiEvaluation ? (
-        <StudentAiEvaluationReport team={team} />
-      ) : (
-        <div className="mt-3 rounded-lg bg-white px-3 py-3 text-sm font-black text-slate-500">AI 평가 결과 대기</div>
-      )}
-    </div>
-  );
-}
-function PivotVote({ room, uid, student }) {
-  const [visible, setVisible] = useState(false);
-  const team = room.teams?.[student.team];
-  const scenarios = room.simulationSettings?.pivotScenarios || PIVOT_SCENARIOS;
-  const savedVote = team?.midDecision?.votes?.[uid] || "";
-  const [selected, setSelected] = useState(savedVote);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const members = getStudentsByTeam(room.students, student.team);
-  const votes = team?.midDecision?.votes || {};
-  const votedCount = members.filter((member) => votes[member.uid]).length;
-  const resolved = team?.midDecision?.resolvedScenario;
-  const winner = scenarios.find((scenario) => scenario.id === resolved);
-
-  useEffect(() => { if (savedVote) setSelected(savedVote); }, [savedVote]);
-  useEffect(() => {
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    const timer = window.setTimeout(() => {
-      setVisible(true);
-      playPivotTransition();
-    }, 3500);
-    return () => {
-      window.clearTimeout(timer);
-      document.body.style.overflow = previousOverflow;
-    };
-  }, []);
-
-  async function confirmVote() {
-    if (!selected || savedVote || busy) return;
-    setBusy(true);
-    setError("");
-    try {
-      await updateOwnTeam(room.ownerUid, room.roomId, student.team, { [`midDecision.votes.${uid}`]: selected }, `${student.nickname} 학생이 피벗 투표를 확정했습니다.`);
-    } catch (err) {
-      setError(writeErrorMessage(err, "피벗 투표를 저장하지 못했습니다."));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  if (!visible) return null;
-  return createPortal((
-    <div className="pivot-vote-overlay" role="dialog" aria-modal="true" aria-labelledby="pivot-vote-title">
-      <section className="pivot-vote-modal">
-        <div className="pivot-vote-top"><span>12개월 피벗 포인트</span><b>{votedCount}/{members.length}명 선택 완료</b></div>
-        <h2 id="pivot-vote-title">우리 회사의 미래를 선택하세요</h2>
-        <p>우리 회사의 미래를 바꿀 아래 10개의 피벗 카드 중 하나를 고르세요. 모든 팀원이 투표하고 가장 높은 투표를 받은 카드가 자동으로 선택됩니다.</p>
-        {resolved && <div className="pivot-resolved-banner"><span>{winner?.icon}</span><div><small>우리 팀 최종 선택</small><strong>{winner?.title || resolved}</strong></div></div>}
-        <div className="pivot-card-viewport">
-          <span className="pivot-scroll-arrow pivot-scroll-arrow-left" aria-hidden="true">‹</span>
-          <div className="pivot-card-scroller" aria-label="피벗 카드 목록">
-            {scenarios.map((scenario, index) => {
-              const active = selected === scenario.id;
-              return (
-                <button key={scenario.id} type="button" disabled={Boolean(savedVote || resolved)} onClick={() => setSelected(scenario.id)} className={`pivot-card pivot-card-tone-${index % 10} ${active ? "pivot-card-selected" : ""}`}>
-                  <span className="pivot-card-icon">{scenario.icon}</span><small>{scenario.tone}</small><h3>{scenario.title}</h3><p>{scenario.summary}</p><dl><div><dt>즉시 효과</dt><dd>{pivotImmediateText(scenario)}</dd></div><div><dt>13~24개월</dt><dd>{pivotEffectText(scenario)}</dd></div></dl>{active && <b className="pivot-card-check"><Check size={16} /> 선택</b>}
-                </button>
-              );
-            })}
-          </div>
-          <span className="pivot-scroll-arrow pivot-scroll-arrow-right" aria-hidden="true">›</span>
-        </div>
-        <div className="pivot-scroll-hint">← 좌우로 밀어 10개 카드를 확인하세요 →</div>
-        <ErrorBanner message={error} onDismiss={() => setError("")} />
-        <button type="button" disabled={!selected || Boolean(savedVote) || busy} onClick={confirmVote} className="pivot-confirm-button">{savedVote ? "선택 확정 완료 · 변경할 수 없음" : busy ? "확정 중..." : "이 카드로 투표 확정"}</button>
-        {savedVote && !resolved && <p className="pivot-waiting-copy">다른 팀원의 선택을 기다리고 있습니다.</p>}
-      </section>
-    </div>
-  ), document.body);
-}
-
-function pivotImmediateText(scenario) {
-  if (scenario.id === "early_exit") return "현재 자산 동결";
-  if (Number(scenario.immediateRate || 0)) return `현재 자산 ${scenario.immediateRate > 0 ? "+" : ""}${scenario.immediateRate}%`;
-  const amount = Number(scenario.immediateAmount || 0);
-  return amount ? `${amount > 0 ? "+" : "-"}${formatWon(Math.abs(amount))}` : "즉시 비용 없음";
-}
-
-function pivotEffectText(scenario) {
-  const primary = Number(scenario.primaryMultiplier || 1);
-  const secondary = Number(scenario.secondaryMultiplier || 1);
-  const descriptions = {
-    government_support: `F09 이벤트 ${primary}배`, professional_management: `최종 자산 ${Number(scenario.dilutionRate || 0)}% 지분 희석`, downsizing: `모든 이벤트 ${primary}배`, aggressive_expansion: `모든 이벤트 ${primary}배`, turnaround: "최저 등급 팩터 1개 상향", early_exit: "13~24개월 이벤트 미적용", global_expansion: `F01·F04 ${primary}배 / F11 ${secondary}배`, ip_protection: `F14 양호 / E05·E19 하락 ${primary}배`, cofounder_reset: `E16·E20 하락 ${primary}배 / 양호 상승 ${secondary}배`, crowdfunding: `F02·F07·F11 ${primary}배`
-  };
-  return descriptions[scenario.id] || scenario.effectLabel;
-}
-
-function Simulation({ room, student }) {
-  const myTeam = room.teams?.[student.team];
-  const displayAsset = getDisplayAsset(myTeam, room.currentMonth || 0);
-  const assetNegative = displayAsset < 0;
-  const investment = Number(myTeam?.investmentsReceived || 0);
-  const baseAsset = getTeamBaseAsset(myTeam);
-  const startingTotal = getTeamStartingCapital(myTeam);
-  const diversity = myTeam?.diversity;
-  return (
-    <section className="student-simulation-screen">
-      <div className={`rounded-lg p-5 text-white ${assetNegative ? "bg-rose-700" : "bg-slate-900"}`}>
-        <div className="flex items-start justify-between gap-3">
-          <div><p className="text-sm text-slate-200">현재 월</p><p className="text-5xl font-black">{room.currentMonth || 0}</p></div>
-          <div className="rounded-lg bg-white/10 px-3 py-2 text-right"><p className="text-xs text-slate-200">출발 총액</p><p className="text-lg font-black">{formatWon(startingTotal)}</p></div>
-        </div>
-        <div className="mt-5 grid grid-cols-2 gap-2">
-          <div className="rounded-lg bg-white/10 p-3">
-            <p className="text-xs text-slate-200">기본 자본금</p>
-            <p className={`text-xl font-black ${baseAsset !== TEAM_BASE_ASSET ? "text-rose-300" : ""}`}>{formatWon(baseAsset)}</p>
-            {diversity && <span className={`diversity-badge diversity-badge-${diversity.key} mt-1`}>{diversity.label} {diversity.rate > 0 ? "+" : ""}{diversity.rate}%</span>}
-          </div>
-          <div className="rounded-lg bg-white/10 p-3"><p className="text-xs text-slate-200">투자 유치금</p><p className="text-xl font-black">{formatWon(investment)}</p></div>
-        </div>
-      </div>
-      {room.currentEvent && (
-        <>
-          <StudentEventShowcase event={room.currentEvent} impact={myTeam?.lastEventImpact} month={room.currentMonth || 0} team={myTeam} simulationSettings={room.simulationSettings} />
-          <article className="mt-4 overflow-hidden rounded-lg bg-white p-4 shadow-lift">
-            <div className="flex gap-3">
-              <img src={getEventImage(room.currentEvent)} alt={room.currentEvent.title} className="h-32 w-20 flex-none rounded-lg object-cover shadow-lift" />
-              <div className="min-w-0">
-                <p className="text-sm font-black uppercase tracking-wide text-indigo-600">{room.currentEvent.factor} · {BUSINESS_FACTORS.find((factor) => factor.id === room.currentEvent.factor)?.name}</p>
-                <h2 className="mt-2 break-keep text-xl font-black">{room.currentEvent.title}</h2>
-                <p className="mt-2 text-sm leading-6 text-slate-600">{room.currentEvent.description}</p>
-                {myTeam?.lastEventImpact?.eventId === room.currentEvent.id && (
-                  <p className="mt-3 text-lg font-black">우리 팀 평가: {myTeam.lastEventImpact.grade} · 자산 변동 {myTeam.lastEventImpact.rate > 0 ? "+" : ""}{myTeam.lastEventImpact.rate}%</p>
-                )}
-              </div>
-            </div>
-          </article>
-        </>
-      )}
-      <SimulationAssetDock event={room.currentEvent} month={room.currentMonth || 0} team={myTeam} simulationSettings={room.simulationSettings} />
-    </section>
-  );
-}
-
-function StudentAiEvaluationReport({ team }) {
-  const evaluation = team.aiEvaluation;
-  return (
-    <article className="mt-4 rounded-lg bg-white p-4 shadow-lift">
-      <p className="text-sm font-black text-indigo-600">AI 평가결과</p>
-      <h3 className="mt-1 break-keep text-xl font-black">{team.teamName} 사업계획 리포트</h3>
-      {team.idea?.serviceName && <p className="mt-1 text-sm font-bold text-slate-600"><span className="text-slate-400">제품 및 서비스명</span> · {team.idea.serviceName}</p>}
-      <p className="mt-3 rounded-lg bg-indigo-50 p-3 text-sm font-bold leading-6 text-indigo-800">{evaluation?.opinion || "아직 평가 의견이 없습니다."}</p>
-      <div className="mt-3 grid gap-2">
-        {BUSINESS_FACTORS.map((factor) => {
-          const item = getEvaluationFactor(team, factor.id);
-          return (
-            <div key={factor.id} className="rounded-lg border border-slate-200 p-3 text-sm">
-              <div className="flex items-center justify-between gap-2">
-                <b className="break-keep">{factor.name}</b>
-                <span className={`rounded-full px-3 py-1 text-xs font-black ${gradeClassName(item?.grade || "보통")}`}>{item?.grade || "보통"}</span>
-              </div>
-              <p className="mt-1 text-xs leading-5 text-slate-600">{item?.reason || factor.description}</p>
-            </div>
-          );
-        })}
-      </div>
-    </article>
-  );
-}
-
-function StudentEventShowcase({ event, impact, month, team, simulationSettings }) {
-  const activeImpact = impact?.eventId === event.id ? impact : null;
-  const projectedImpact = useMemo(
-    () => activeImpact || applyRiskMultiplier(team, event, simulationSettings, month).lastEventImpact,
-    [activeImpact, event, month, simulationSettings, team]
-  );
-  const [impactVisible, setImpactVisible] = useState(false);
-  const rate = Number(projectedImpact?.rate || 0);
-
-  useEffect(() => {
-    setImpactVisible(false);
-    const timer = window.setTimeout(() => setImpactVisible(true), 500);
-    return () => window.clearTimeout(timer);
-  }, [event.id, month]);
-
-  return (
-    <div className="student-event-showcase" key={`${month}-${event.id}`}>
-      <div className="event-spark event-spark-one" />
-      <div className="event-spark event-spark-two" />
-      <div className="student-event-card-wrap">
-        <EventCardVisual event={event}>
-          {impactVisible && projectedImpact && (
-            <div className={`event-card-impact-float ${rate >= 0 ? "student-impact-positive" : "student-impact-negative"}`} role="status" aria-live="polite">
-              <span>{rate >= 0 ? "▲" : "▼"}</span>
-              <strong>{rate > 0 ? "+" : ""}{rate}%</strong>
-              <small>{rate >= 0 ? "자산 증가" : "자산 감소"} · {projectedImpact.grade}</small>
-            </div>
-          )}
-        </EventCardVisual>
-      </div>
-    </div>
-  );
-}
-
-function SimulationAssetDock({ event, month, team, simulationSettings }) {
-  const activeImpact = event && team?.lastEventImpact?.eventId === event.id ? team.lastEventImpact : null;
-  const projectedImpact = useMemo(() => {
-    if (!event || !team) return null;
-    return activeImpact || applyRiskMultiplier(team, event, simulationSettings, month).lastEventImpact;
-  }, [activeImpact, event, month, simulationSettings, team]);
-  const currentAsset = Number(team?.currentAsset ?? getTeamStartingCapital(team));
-  const beforeAsset = Number(projectedImpact?.beforeAsset ?? currentAsset);
-  const afterAsset = Number(projectedImpact?.afterAsset ?? currentAsset);
-  const rate = Number(projectedImpact?.rate || 0);
-  const startingTotal = getTeamStartingCapital(team);
-  const cumulativeRate = startingTotal ? ((afterAsset - startingTotal) / startingTotal) * 100 : 0;
-  const tone = !event ? "neutral" : rate < 0 ? "negative" : "positive";
-
-  return createPortal((
-    <div className={`simulation-asset-dock simulation-asset-dock-${tone}`} role="status" aria-live="polite">
-      <div className="simulation-asset-dock-main">
-        <span>우리 팀 현재 자산</span>
-        <RollingWon from={beforeAsset} to={afterAsset} active={Boolean(event)} duration={1500} />
-      </div>
-      <div className="simulation-asset-dock-meta">
-        <span>최초 시작 자산 {formatWon(startingTotal)}</span>
-        <b>현재 {cumulativeRate >= 0 ? "+" : ""}{cumulativeRate.toFixed(1)}% 변동</b>
-      </div>
-    </div>
-  ), document.body);
-}
-
-function RollingWon({ from, to, active, duration = 1500 }) {
-  const [value, setValue] = useState(active ? from : to);
-  useEffect(() => {
-    if (!active) { setValue(to); return undefined; }
-    let frame = 0;
-    const startedAt = performance.now();
-    const tick = (now) => {
-      const progress = Math.min(1, (now - startedAt) / duration);
-      const eased = 1 - Math.pow(1 - progress, 3);
-      setValue(Math.round(from + (to - from) * eased));
-      if (progress < 1) frame = requestAnimationFrame(tick);
-    };
-    frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
-  }, [active, duration, from, to]);
-  return <strong className={active ? "asset-number-rolling" : ""}>{formatWon(value)}</strong>;
-}
-
-function PivotResultBadge({ team, settings, compact = false }) {
-  const scenario = getPivotScenario(settings, team?.pivotScenarioId || team?.pivotModifiers?.scenarioId || team?.midDecision?.resolvedScenario);
-  if (!scenario) return null;
-  return (
-    <div className={`report-pivot-choice ${compact ? "report-pivot-choice-compact" : ""}`}>
-      <span>{scenario.icon}</span>
-      <div>
-        <small>12개월 피벗 전략</small>
-        <strong>{scenario.title}</strong>
-        {!compact && <em>{scenario.summary}<br />즉시: {pivotImmediateText(scenario)} · 이후: {pivotEffectText(scenario)}</em>}
-      </div>
-    </div>
-  );
-}
-
-function Result({ room, student }) {
-  const [selected, setSelected] = useState(null);
-  const [tab, setTab] = useState("company");
-  const rankedTeams = useMemo(() => rankTeams(room.teams), [room.teams]);
-  const rankedInvestors = useMemo(() => rankInvestors(room.students, room.teams), [room.students, room.teams]);
-  const insights = useMemo(() => buildResultInsights(room.teams), [room.teams]);
-  const winner = rankedTeams[0];
-  if (tab === "investor") {
-    return <section><ResultTabs tab={tab} setTab={setTab} /><StudentInvestorView room={room} student={student} investors={rankedInvestors} /></section>;
-  }
-  return (
-    <section className="student-result-screen">
-      <ResultTabs tab={tab} setTab={setTab} />
-      <h2 className="text-2xl font-black">최종 순위 및 사업 리포트</h2>
-      <div className="student-result-insights">{insights.map((insight) => <article key={insight.label}><span>{insight.icon}</span><div><small>{insight.label}</small><strong>{insight.value} · 최종 {insight.rank}위</strong></div></article>)}</div>
-      {winner && (
-        <button onClick={() => setSelected(winner)} className="mt-4 w-full overflow-hidden rounded-lg bg-gradient-to-br from-amber-300 via-orange-500 to-rose-600 p-1 text-left shadow-[0_16px_40px_rgba(245,158,11,0.35)]">
-          <div className="rounded-lg bg-white/95 p-5">
-            <p className="text-sm font-black text-amber-700">1위 팀</p>
-            <h3 className="mt-1 text-4xl font-black text-slate-950">{winner.teamName}</h3>
-            <PivotResultBadge team={winner} settings={room.simulationSettings} />
-            <AssetChangeSummary team={winner} featured className="mt-3" />
-            <AssetTrendChart team={winner} size="compact" className="mt-4" />
-          </div>
-        </button>
-      )}
-      <div className="mt-4 grid grid-cols-3 items-end gap-2">
-        {[rankedTeams[1], rankedTeams[0], rankedTeams[2]].map((team, index) => {
-          if (!team) return <div key={index} />;
-          const place = index === 1 ? 1 : index === 0 ? 2 : 3;
-          return (
-            <button key={team.key} onClick={() => setSelected(team)} className={`rounded-lg p-3 shadow-lift ${place === 1 ? "min-h-36 bg-amber-50 ring-2 ring-amber-300" : "min-h-28 bg-white"}`}>
-              <Award className={`mx-auto ${place === 1 ? "text-amber-500" : "text-slate-400"}`} />
-              <p className={`mt-2 text-2xl font-black ${place === 1 ? "text-amber-700" : ""}`}>{place}위</p>
-              <p className="break-keep text-sm font-bold">{team.teamName}</p>
-              {place === 1 && <p className="mt-1 text-xs font-black text-slate-800">{formatWon(team.currentAsset || 0)}</p>}
-            </button>
-          );
-        })}
-      </div>
-      <div className="mt-5 space-y-2">
-        {rankedTeams.map((team, index) => {
-          const change = getAssetChange(team);
-          return (
-          <button key={team.key} onClick={() => setSelected(team)} className={`touch-button report-row w-full rounded-lg px-4 py-3 text-left shadow-lift ${index === 0 ? "bg-amber-50 ring-2 ring-amber-300" : "bg-white"}`}>
-            <div className="flex items-center justify-between gap-3">
-              <span className="flex items-center gap-2 font-black"><span className={`rank-medal rank-medal-${Math.min(index + 1, 4)}`}>{index + 1}</span>{team.teamName}</span>
-              <span className={`text-right font-black ${change.positive ? "text-emerald-600" : "text-rose-600"}`}>
-                {formatWon(change.final)}
-                <small className="block text-[11px] font-black">{change.positive ? "▲ +" : "▼ "}{change.rate.toFixed(1)}%</small>
-              </span>
-            </div>
-            <PivotResultBadge team={team} settings={room.simulationSettings} />
-            <AssetChangeSummary team={team} className="mt-2" />
-            <div className="mt-2 flex flex-wrap gap-1">
-              {getStudentsByTeam(room.students, team.key).map((member) => (
-                <span key={member.uid} className="rounded-full bg-white px-2 py-1 text-[11px] font-black text-slate-600 ring-1 ring-slate-200">{member.nickname}</span>
-              ))}
-            </div>
-          </button>
-          );
-        })}
-      </div>
-      {selected && <ReportModal team={selected} settings={room.simulationSettings} members={getStudentsByTeam(room.students, selected.key)} onClose={() => setSelected(null)} />}
-    </section>
-  );
-}
-
-function ResultTabs({ tab, setTab }) {
-  return <div className="result-tabs" role="tablist" aria-label="최종 순위 구분"><button type="button" role="tab" aria-selected={tab === "company"} onClick={() => setTab("company")}>기업 순위</button><button type="button" role="tab" aria-selected={tab === "investor"} onClick={() => setTab("investor")}>나는 투자왕</button></div>;
-}
-
-function StudentInvestorView({ room, student, investors }) {
-  const myIndex = investors.findIndex((investor) => investor.uid === student.uid);
-  const portfolio = myIndex >= 0 ? investors[myIndex].portfolio : calculateInvestmentPortfolio(student, room.teams);
-  return (
-    <div className="student-investor-view">
-      <section className="student-investor-hero">
-        <p>5천만원으로 만든 나의 투자 결과</p><strong>{formatWon(portfolio.finalValue)}</strong><span className={portfolio.profit >= 0 ? "profit-up" : "profit-down"}>{portfolio.profit >= 0 ? "+" : ""}{formatWon(portfolio.profit)} · {portfolio.rate >= 0 ? "+" : ""}{portfolio.rate.toFixed(1)}%</span>
-        <div><b>내 순위 {myIndex >= 0 ? `${myIndex + 1}위` : "-"}</b><span>현금 잔액 {formatWon(portfolio.cash)}</span></div>
-      </section>
-      <section className="student-holdings"><h3>내 투자금 현황</h3>{portfolio.holdings.length ? portfolio.holdings.map((holding) => <div key={holding.teamKey}><span><b>{room.teams[holding.teamKey]?.teamName || holding.teamKey}</b><small>투자 {formatWon(holding.amount)}</small></span><strong>{formatWon(holding.value)}<small>{(holding.ratio * 100).toFixed(1)}%</small></strong></div>) : <p>투자하지 않은 금액은 현금으로 유지되었습니다.</p>}</section>
-      <section className="investor-ranking investor-ranking-compact"><div className="investor-ranking-heading"><div><p>나는 투자왕</p><h3>TOP 3</h3></div><Crown size={28} /></div><div className="investor-ranking-list">{investors.slice(0, 3).map((investor, index) => <div key={investor.uid} className={`investor-top-${index + 1} ${investor.uid === student.uid ? "investor-me" : ""}`}><b>{index + 1}</b><span><strong>{investor.nickname}</strong><small>수익률 {investor.portfolio.rate >= 0 ? "+" : ""}{investor.portfolio.rate.toFixed(1)}%</small></span><em>{formatWon(investor.portfolio.finalValue)}</em></div>)}</div></section>
-    </div>
-  );
-}
 function CanvasBlock({ title, children }) {
   return <section className="mt-4 rounded-lg bg-white p-4 shadow-lift"><h3 className="mb-3 flex items-center gap-2 font-black"><Lightbulb size={18} /> {title}</h3>{children}</section>;
-}
-
-function getDisplayAsset(team, currentMonth) {
-  if (!team) return 0;
-  if (currentMonth > 0 || team.lastEventImpact) return Number(team.currentAsset || 0);
-  return getTeamStartingCapital(team);
 }
 
 function MultiChipGroup({ options, values = [], limit, allowCustom = false, disabled = false, onChange }) {
@@ -1480,39 +884,6 @@ function MultiChipGroup({ options, values = [], limit, allowCustom = false, disa
   );
 }
 
-function ReportModal({ team, settings, members = [], onClose }) {
-  const change = getAssetChange(team);
-  const profit = change.delta;
-  return (
-    <div className="fixed inset-0 z-20 flex items-end bg-slate-900/50 p-4" onClick={onClose}>
-      <div className="max-h-[86vh] w-full overflow-y-auto rounded-lg bg-white p-5 shadow-lift" onClick={(event) => event.stopPropagation()}>
-        <h3 className="text-2xl font-black">{team.teamName} 성적표</h3>
-        {team.idea?.serviceName && <p className="mt-1 text-sm font-bold text-indigo-700">{team.idea.serviceName}</p>}
-        <PivotResultBadge team={team} settings={settings} />
-        <AssetChangeSummary team={team} featured className="mt-3" />
-        <div className="mt-3 flex flex-wrap gap-2">
-          {members.map((member) => (
-            <span key={member.uid} className="rounded-full bg-slate-100 px-3 py-2 text-xs font-black text-slate-700 ring-1 ring-slate-200">{member.nickname}</span>
-          ))}
-        </div>
-        <AssetTrendChart team={team} size="compact" className="mt-4" />
-        <div className="mt-4 space-y-3 text-sm leading-6">
-          <p><b>선택 트렌드:</b> {team.trendCard?.title || "미선택"}</p>
-          <p><b>선택 기술카드:</b> {team.techCard?.title || "미선택"}</p>
-          <p><b>제품 및 서비스명:</b> {team.idea?.serviceName || "-"}</p>
-          <p><b>문제정의:</b> {team.idea?.problem || "-"}</p>
-          <p><b>고객정의:</b> {(team.idea?.customers || []).join(", ") || "-"}</p>
-          <p><b>제품/서비스:</b> {team.idea?.product || "-"}</p>
-          <p><b>수익모델:</b> {(team.idea?.revenueModels || []).join(", ") || "-"}</p>
-          <p><b>최초 총 자산:</b> {formatWon(change.initial)}</p>
-          <p><b>최종 총 자산:</b> <span className={`font-black ${change.positive ? "text-emerald-600" : "text-rose-600"}`}>{formatWon(change.final)}</span></p>
-          <p><b>최종 수익:</b> <span className={`font-black ${profit >= 0 ? "text-emerald-600" : "text-rose-600"}`}>{profit >= 0 ? "+" : ""}{formatWon(profit)}</span></p>
-        </div>
-        <button onClick={onClose} className="touch-button mt-5 w-full rounded-lg bg-slate-900 px-4 py-3 font-bold text-white">닫기</button>
-      </div>
-    </div>
-  );
-}
 function Notice({ children }) {
   return <div className="rounded-lg bg-white p-5 text-center font-bold shadow-lift">{children}</div>;
 }

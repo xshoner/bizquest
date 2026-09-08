@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="BizQuest">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#312e81"/>
+      <stop offset="0.55" stop-color="#4f46e5"/>
+      <stop offset="1" stop-color="#0891b2"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#g)"/>
+  <path d="M120 132h145c72 0 116 32 116 86 0 31-17 56-47 69 40 12 61 40 61 80 0 65-52 101-137 101H120V132Zm87 68v57h49c25 0 38-10 38-29 0-19-13-28-38-28h-49Zm0 121v79h58c29 0 44-13 44-39s-15-40-44-40h-58Z" fill="#fff"/>
+  <circle cx="390" cy="126" r="42" fill="#facc15"/>
+  <path d="m374 126 11 11 22-25" fill="none" stroke="#312e81" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

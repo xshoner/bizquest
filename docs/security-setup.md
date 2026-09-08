@@ -78,7 +78,7 @@ firebase emulators:start --only firestore
 
 ## 3. AI 평가 프록시
 
-코드: [`server/aiEvaluationHandler.js`](../server/aiEvaluationHandler.js) (Cloudflare `functions/api/ai-evaluation.js`, Netlify `netlify/functions/ai-evaluation.js`가 공통 사용)
+코드: [`server/aiEvaluationHandler.js`](../server/aiEvaluationHandler.js)와 Cloudflare `functions/api/ai-evaluation.js`
 
 ### 요청 형식
 
@@ -106,7 +106,7 @@ Content-Type: application/json
 
 | 변수 | 위치 | 설명 |
 |---|---|---|
-| `GEMINI_API_KEY` | Cloudflare Pages → Settings → Environment variables / Netlify → Site settings → Environment variables | 필수 |
+| `GEMINI_API_KEY` | Cloudflare Pages → Settings → Environment variables | 필수 |
 | `FIREBASE_PROJECT_ID` | 동일 | 선택, 기본값 `startup-5ec16` |
 
 로컬 `.env`는 절대 커밋하지 마세요(`.gitignore`에 포함).

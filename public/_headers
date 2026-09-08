@@ -25,5 +25,11 @@
 /api/*
   Cache-Control: no-store
 
+/sw.js
+  Cache-Control: no-cache, no-store, must-revalidate
+
+/manifest.webmanifest
+  Cache-Control: public, max-age=3600
+
 /*
   Cache-Control: public, max-age=0, must-revalidate

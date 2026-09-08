@@ -1,0 +1,20 @@
+{
+  "name": "BizQuest · 스타트업 히어로",
+  "short_name": "BizQuest",
+  "description": "팀빌딩 기반 청소년 창업·투자·경영 시뮬레이션",
+  "lang": "ko-KR",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f5f7fb",
+  "theme_color": "#312e81",
+  "icons": [
+    {
+      "src": "/app-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
