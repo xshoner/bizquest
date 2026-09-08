@@ -1,6 +1,7 @@
 ﻿import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { Award, Check, CircleDollarSign, Crown, Lightbulb, Pencil, RotateCcw, Send, TrendingUp } from "lucide-react";
+import { Award, Check, CircleDollarSign, Crown, Lightbulb, Pencil, RotateCcw, Send } from "lucide-react";
 import { auth, onAuthStateChanged, setDoc, signInAnonymously } from "../firebase.js";
 import {
   C_LEVEL_KEYS,
@@ -17,7 +18,7 @@ import {
   TECH_CARDS,
   TREND_CARDS
 } from "../data/gameData.js";
-import { INVESTMENT_BUDGET, INVESTMENT_STEP, TEAM_BASE_ASSET, buildResultInsights, calculateInvestmentPortfolio, formatWon, getAssetChange, getStudentsByTeam, getTeamBaseAsset, getTeamEntries, getTeamStartingCapital, makeStudent, normalizeTeamName, rankInvestors, rankTeams, sumInvestments } from "../lib/game.js";
+import { INVESTMENT_BUDGET, INVESTMENT_STEP, TEAM_BASE_ASSET, applyRiskMultiplier, buildResultInsights, calculateInvestmentPortfolio, formatWon, getAssetChange, getStudentsByTeam, getTeamBaseAsset, getTeamEntries, getTeamStartingCapital, makeStudent, normalizeTeamName, rankInvestors, rankTeams, sumInvestments } from "../lib/game.js";
 import { PIVOT_SCENARIOS } from "../data/simulationSettings.js";
 import { studentDocRef, useRoom } from "../hooks/useRoom.js";
 import { updateOwnStudent, updateOwnTeam } from "../lib/roomStore.js";
@@ -1085,7 +1086,15 @@ function PivotVote({ room, uid, student }) {
   const winner = scenarios.find((scenario) => scenario.id === resolved);
 
   useEffect(() => { if (savedVote) setSelected(savedVote); }, [savedVote]);
-  useEffect(() => { const timer = window.setTimeout(() => setVisible(true), 1050); return () => window.clearTimeout(timer); }, []);
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const timer = window.setTimeout(() => setVisible(true), 3500);
+    return () => {
+      window.clearTimeout(timer);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, []);
 
   async function confirmVote() {
     if (!selected || savedVote || busy) return;
@@ -1101,7 +1110,7 @@ function PivotVote({ room, uid, student }) {
   }
 
   if (!visible) return null;
-  return (
+  return createPortal((
     <div className="pivot-vote-overlay" role="dialog" aria-modal="true" aria-labelledby="pivot-vote-title">
       <section className="pivot-vote-modal">
         <div className="pivot-vote-top"><span>12개월 피벗 포인트</span><b>{votedCount}/{members.length}명 선택 완료</b></div>
@@ -1128,7 +1137,7 @@ function PivotVote({ room, uid, student }) {
         {savedVote && !resolved && <p className="pivot-waiting-copy">다른 팀원의 선택을 기다리고 있습니다.</p>}
       </section>
     </div>
-  );
+  ), document.body);
 }
 
 function pivotImmediateText(scenario) {
@@ -1155,26 +1164,8 @@ function Simulation({ room, student }) {
   const baseAsset = getTeamBaseAsset(myTeam);
   const startingTotal = getTeamStartingCapital(myTeam);
   const diversity = myTeam?.diversity;
-  const impact = myTeam?.lastEventImpact;
-  const impactRate = impact ? Number(impact.rate || 0) : 0;
-  const impactAmount = impact ? Number(impact.afterAsset || 0) - Number(impact.beforeAsset || 0) : 0;
-  const totalDelta = displayAsset - startingTotal;
-  const totalRate = startingTotal ? (totalDelta / startingTotal) * 100 : 0;
-  const currentImpact = impact?.eventId === room.currentEvent?.id ? impact : null;
-  const assetToneNegative = currentImpact ? impactAmount < 0 : totalDelta < 0;
   return (
-    <section>
-      <div className={`student-asset-pulse ${assetToneNegative ? "student-asset-pulse-negative" : "student-asset-pulse-positive"}`}>
-        <div>
-          <p>우리 팀 현재 자산</p>
-          <RollingWon from={Number(currentImpact?.beforeAsset ?? displayAsset)} to={displayAsset} active={Boolean(currentImpact)} />
-        </div>
-        <div className="text-right">
-          <p>출발 총액 대비</p>
-          <strong>{totalRate >= 0 ? "+" : ""}{totalRate.toFixed(1)}%</strong>
-          <span>{room.currentMonth || 0}개월 · {impact ? `이번 달 ${impactRate > 0 ? "+" : ""}${impactRate}%` : "변동 대기"}</span>
-        </div>
-      </div>
+    <section className="student-simulation-screen">
       <div className={`rounded-lg p-5 text-white ${assetNegative ? "bg-rose-700" : "bg-slate-900"}`}>
         <div className="flex items-start justify-between gap-3">
           <div><p className="text-sm text-slate-200">현재 월</p><p className="text-5xl font-black">{room.currentMonth || 0}</p></div>
@@ -1191,7 +1182,7 @@ function Simulation({ room, student }) {
       </div>
       {room.currentEvent && (
         <>
-          <StudentEventShowcase event={room.currentEvent} impact={myTeam?.lastEventImpact} month={room.currentMonth || 0} team={myTeam} />
+          <StudentEventShowcase event={room.currentEvent} impact={myTeam?.lastEventImpact} month={room.currentMonth || 0} team={myTeam} simulationSettings={room.simulationSettings} />
           <article className="mt-4 overflow-hidden rounded-lg bg-white p-4 shadow-lift">
             <div className="flex gap-3">
               <img src={getEventImage(room.currentEvent)} alt={room.currentEvent.title} className="h-32 w-20 flex-none rounded-lg object-cover shadow-lift" />
@@ -1207,7 +1198,7 @@ function Simulation({ room, student }) {
           </article>
         </>
       )}
-      <AssetBars teams={room.teams} currentMonth={room.currentMonth || 0} />
+      <SimulationAssetDock event={room.currentEvent} month={room.currentMonth || 0} team={myTeam} simulationSettings={room.simulationSettings} />
     </section>
   );
 }
@@ -1238,27 +1229,20 @@ function StudentAiEvaluationReport({ team }) {
   );
 }
 
-function StudentEventShowcase({ event, impact, month, team }) {
+function StudentEventShowcase({ event, impact, month, team, simulationSettings }) {
   const activeImpact = impact?.eventId === event.id ? impact : null;
-  const rate = activeImpact ? Number(activeImpact.rate || 0) : 0;
-  const currentAsset = Number(team?.currentAsset ?? getTeamStartingCapital(team));
-  const beforeAsset = Number(activeImpact?.beforeAsset ?? currentAsset);
-  const afterAsset = Number(activeImpact?.afterAsset ?? currentAsset);
-  const changedAmount = afterAsset - beforeAsset;
-  const changePct = beforeAsset ? Math.round(((afterAsset - beforeAsset) / beforeAsset) * 1000) / 10 : 0;
-  const startingTotal = getTeamStartingCapital(team);
-  const totalRate = startingTotal ? ((afterAsset - startingTotal) / startingTotal) * 100 : 0;
-  const changeIsNegative = activeImpact ? changedAmount < 0 : currentAsset < startingTotal;
-  const history = Array.isArray(team?.assetHistory) ? team.assetHistory.slice(-6) : [];
-  const graphValues = history.length > 1 ? history.map((item) => Number(item.asset || 0)) : [beforeAsset, afterAsset];
-  const graphMin = Math.min(...graphValues);
-  const graphMax = Math.max(...graphValues);
-  const graphRange = Math.max(1, graphMax - graphMin);
-  const graphPoints = graphValues.map((value, index) => {
-    const x = graphValues.length === 1 ? 0 : (index / (graphValues.length - 1)) * 100;
-    const y = 48 - ((value - graphMin) / graphRange) * 40;
-    return `${x},${y}`;
-  }).join(" ");
+  const projectedImpact = useMemo(
+    () => activeImpact || applyRiskMultiplier(team, event, simulationSettings, month).lastEventImpact,
+    [activeImpact, event, month, simulationSettings, team]
+  );
+  const [impactVisible, setImpactVisible] = useState(false);
+  const rate = Number(projectedImpact?.rate || 0);
+
+  useEffect(() => {
+    setImpactVisible(false);
+    const timer = window.setTimeout(() => setImpactVisible(true), 500);
+    return () => window.clearTimeout(timer);
+  }, [event.id, month]);
 
   return (
     <div className="student-event-showcase" key={`${month}-${event.id}`}>
@@ -1266,36 +1250,53 @@ function StudentEventShowcase({ event, impact, month, team }) {
       <div className="event-spark event-spark-two" />
       <div className="student-event-card-wrap">
         <EventCardVisual event={event}>
-          {activeImpact && (
-            <div key={`${month}-${event.id}-${afterAsset}`} className={`event-card-impact-float ${rate >= 0 ? "student-impact-positive" : "student-impact-negative"}`} role="status" aria-live="polite">
+          {impactVisible && projectedImpact && (
+            <div className={`event-card-impact-float ${rate >= 0 ? "student-impact-positive" : "student-impact-negative"}`} role="status" aria-live="polite">
               <span>{rate >= 0 ? "▲" : "▼"}</span>
               <strong>{rate > 0 ? "+" : ""}{rate}%</strong>
-              <small>{rate >= 0 ? "자산 증가" : "자산 감소"} · {activeImpact.grade}</small>
+              <small>{rate >= 0 ? "자산 증가" : "자산 감소"} · {projectedImpact.grade}</small>
             </div>
           )}
         </EventCardVisual>
-      </div>
-      <div className={`student-event-asset-overlay ${activeImpact ? "student-event-asset-applied" : ""} ${changeIsNegative ? "student-event-asset-negative" : "student-event-asset-positive"}`}>
-        <div>
-          <p>{activeImpact ? "우리 팀 실시간 자산" : "현재 자산 현황"}</p>
-          <RollingWon from={beforeAsset} to={afterAsset} active={Boolean(activeImpact)} />
-          <span>{activeImpact ? `이번 달 ${changedAmount >= 0 ? "+" : ""}${formatWon(changedAmount)} · ${changePct >= 0 ? "+" : ""}${changePct}%` : "이번 달 이벤트 반영 중"}<br />출발 대비 {totalRate >= 0 ? "+" : ""}{totalRate.toFixed(1)}%</span>
-        </div>
-        <svg viewBox="0 0 100 56" role="img" aria-label="우리 팀 자산 변화 그래프">
-          <polyline points={graphPoints} />
-        </svg>
       </div>
     </div>
   );
 }
 
-function RollingWon({ from, to, active }) {
+function SimulationAssetDock({ event, month, team, simulationSettings }) {
+  const activeImpact = event && team?.lastEventImpact?.eventId === event.id ? team.lastEventImpact : null;
+  const projectedImpact = useMemo(() => {
+    if (!event || !team) return null;
+    return activeImpact || applyRiskMultiplier(team, event, simulationSettings, month).lastEventImpact;
+  }, [activeImpact, event, month, simulationSettings, team]);
+  const currentAsset = Number(team?.currentAsset ?? getTeamStartingCapital(team));
+  const beforeAsset = Number(projectedImpact?.beforeAsset ?? currentAsset);
+  const afterAsset = Number(projectedImpact?.afterAsset ?? currentAsset);
+  const rate = Number(projectedImpact?.rate || 0);
+  const startingTotal = getTeamStartingCapital(team);
+  const cumulativeRate = startingTotal ? ((afterAsset - startingTotal) / startingTotal) * 100 : 0;
+  const tone = !event ? "neutral" : rate < 0 ? "negative" : "positive";
+
+  return createPortal((
+    <div className={`simulation-asset-dock simulation-asset-dock-${tone}`} role="status" aria-live="polite">
+      <div className="simulation-asset-dock-main">
+        <span>우리 팀 현재 자산</span>
+        <RollingWon from={beforeAsset} to={afterAsset} active={Boolean(event)} duration={1500} />
+      </div>
+      <div className="simulation-asset-dock-meta">
+        <span>최초 시작 자산 {formatWon(startingTotal)}</span>
+        <b>현재 {cumulativeRate >= 0 ? "+" : ""}{cumulativeRate.toFixed(1)}% 변동</b>
+      </div>
+    </div>
+  ), document.body);
+}
+
+function RollingWon({ from, to, active, duration = 1500 }) {
   const [value, setValue] = useState(active ? from : to);
   useEffect(() => {
     if (!active) { setValue(to); return undefined; }
     let frame = 0;
     const startedAt = performance.now();
-    const duration = 1000;
     const tick = (now) => {
       const progress = Math.min(1, (now - startedAt) / duration);
       const eased = 1 - Math.pow(1 - progress, 3);
@@ -1304,7 +1305,7 @@ function RollingWon({ from, to, active }) {
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [active, from, to]);
+  }, [active, duration, from, to]);
   return <strong className={active ? "asset-number-rolling" : ""}>{formatWon(value)}</strong>;
 }
 
@@ -1392,28 +1393,6 @@ function StudentInvestorView({ room, student, investors }) {
     </div>
   );
 }
-function AssetBars({ teams, currentMonth = 0 }) {
-  const ranked = rankTeams(teams);
-  const values = ranked.map((team) => getDisplayAsset(team, currentMonth));
-  const maxAbs = Math.max(1, ...values.map((value) => Math.abs(value)));
-  return (
-    <div className="mt-4 rounded-lg bg-white p-4 shadow-lift">
-      <h3 className="flex items-center gap-2 font-black"><TrendingUp size={18} /> 팀별 실시간 자산</h3>
-      <div className="mt-3 space-y-3">
-        {ranked.map((team) => {
-          const value = getDisplayAsset(team, currentMonth);
-          return (
-            <div key={team.key}>
-              <div className="mb-1 flex justify-between text-sm"><span className="font-bold">{team.teamName}</span><span className={value < 0 ? "font-bold text-rose-600" : ""}>{formatWon(value)}</span></div>
-              <div className="h-3 overflow-hidden rounded-full bg-slate-100"><div className={`h-full rounded-full transition-all ${value < 0 ? "bg-rose-500" : "bg-indigo-500"}`} style={{ width: `${Math.max(3, (Math.abs(value) / maxAbs) * 100)}%` }} /></div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 function CanvasBlock({ title, children }) {
   return <section className="mt-4 rounded-lg bg-white p-4 shadow-lift"><h3 className="mb-3 flex items-center gap-2 font-black"><Lightbulb size={18} /> {title}</h3>{children}</section>;
 }

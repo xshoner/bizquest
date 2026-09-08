@@ -109,7 +109,7 @@ const PHASE_ICONS = {
 /** Interval between simulated months. */
 const SIMULATION_EVENT_DELAY = 5000;
 /** Delay between announcing an event and applying its asset impact. */
-const SIMULATION_EVENT_APPLY_DELAY = 4000;
+const SIMULATION_EVENT_APPLY_DELAY = 1500;
 /** Time before the result board is revealed after the teacher presses "최종 결과". */
 const RESULT_FINALIZE_DELAY = 3000;
 const SIMULATION_LEASE_TIMEOUT = 12000;
@@ -591,7 +591,7 @@ export default function AdminPage() {
 
   useEffect(() => {
     if (!["voting", "ready"].includes(room?.pivotPhase)) { setPivotUiVisible(false); return undefined; }
-    const timer = window.setTimeout(() => setPivotUiVisible(true), 1000);
+    const timer = window.setTimeout(() => setPivotUiVisible(true), 3500);
     return () => window.clearTimeout(timer);
   }, [room?.pivotPhase]);
 
