@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { calculateInvestmentPortfolio, makePivotTeamPatch, rankInvestors, resolvePivotVote, applyRiskMultiplier } from "./game.js";
+import { calculateInvestmentPortfolio, getAssetChange, makePivotTeamPatch, rankInvestors, resolvePivotVote, applyRiskMultiplier } from "./game.js";
 import { PIVOT_SCENARIOS } from "../data/simulationSettings.js";
 
 const baseTeam = {
@@ -40,4 +40,10 @@ test("조기 청산은 13개월 이후 이벤트 자산 변동을 동결한다",
   const affected = applyRiskMultiplier({ ...baseTeam, pivotModifiers: pivot.pivotModifiers }, { id: "E01", factor: "F01", rates: { 보통: -20 } }, {}, 13);
   assert.equal(affected.lastEventImpact.rate, 0);
   assert.equal(affected.currentAsset, baseTeam.currentAsset);
+});
+
+test("시뮬레이션 누적 수익률은 출발 총액을 기준으로 계산한다", () => {
+  const change = getAssetChange({ initialCapital: 127_000_000, baseAsset: 100_000_000, currentAsset: 100_405_711 });
+  assert.equal(change.delta, -26_594_289);
+  assert.ok(Math.abs(change.rate - (-20.940385)) < 0.00001);
 });

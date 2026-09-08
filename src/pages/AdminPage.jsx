@@ -986,7 +986,7 @@ export default function AdminPage() {
   async function renameTeam(teamKey, teamName) {
     const fallback = teams[teamKey]?.teamName || "팀";
     await updateRoom({
-      [`teams.${teamKey}.teamName`]: normalizeTeamName(teamName.trim() || fallback),
+      [`teams.${teamKey}.teamName`]: normalizeTeamName(teamName.trim() || fallback).slice(0, 10),
       sysMessage: "팀 이름이 변경되었습니다."
     });
   }
@@ -1657,7 +1657,7 @@ function TeamGrid({ roomStatus, teams, students, onOpenStudentMenu, onRenameTeam
         <button onClick={onAddTeam} className="print:hidden admin-ui-button admin-ui-button-primary"><Plus size={15} /> 팀 추가</button>
       </div>
       <div className="admin-team-grid grid gap-4 md:grid-cols-2">
-        {getTeamEntries(teams).map(([key, team]) => {
+        {getTeamEntries(teams).map(([key, team], teamIndex) => {
           const cardSelectionComplete = Boolean(team.trendCard && team.techCard);
           const members = getStudentsByTeam(students, key).sort((a, b) => {
             if (a.uid === team.leaderId) return -1;
@@ -1666,7 +1666,7 @@ function TeamGrid({ roomStatus, teams, students, onOpenStudentMenu, onRenameTeam
           });
           const diversity = team.diversity;
           return (
-            <section key={key} className="admin-team-card">
+            <section key={key} className={`admin-team-card admin-team-tone-${teamIndex % 6}`}>
               <div className="admin-team-identity">
                 <div className="admin-team-main-row">
                   <div className="admin-team-avatar-column">
@@ -1674,7 +1674,7 @@ function TeamGrid({ roomStatus, teams, students, onOpenStudentMenu, onRenameTeam
                     <span className="team-member-count" title="현재 팀 인원"><Users size={12} /> 총 {members.length}명</span>
                   </div>
                   <div className="admin-team-title-column">
-                    <input key={`${key}-${team.teamName}`} defaultValue={team.teamName} onBlur={(event) => onRenameTeam(key, event.target.value)} />
+                    <input key={`${key}-${team.teamName}`} maxLength={10} defaultValue={team.teamName} onBlur={(event) => onRenameTeam(key, event.target.value)} />
                     <div className="admin-team-meta-row">
                       {team.teamSetupComplete && <span className="team-setup-complete"><CheckCircle2 size={12} /> 팀구성 완료</span>}
                       <button title="팀 삭제" onClick={() => onDeleteTeam(key)} className="print:hidden admin-team-delete"><Trash2 size={14} /> 삭제</button>
@@ -2221,6 +2221,7 @@ function ResultBoard({ rankedTeams, rankedInvestors, teams, students, room }) {
         {rankedTeams.map((team, index) => {
           const change = getAssetChange(team);
           const members = getStudentsByTeam(students, team.key);
+          const pivotScenario = getPivotScenario(room.simulationSettings, team.pivotScenarioId || team.midDecision?.resolvedScenario);
           return (
             <article key={team.key} className={`report-team-card ${index === 0 ? "report-team-card-winner" : ""}`}>
               <div className="report-team-head">
@@ -2237,6 +2238,8 @@ function ResultBoard({ rankedTeams, rankedInvestors, teams, students, room }) {
                   <span>{change.positive ? "▲ +" : "▼ "}{formatWon(change.delta)} ({change.positive ? "+" : ""}{change.rate.toFixed(1)}%)</span>
                 </div>
               </div>
+
+              {pivotScenario && <div className="report-pivot-choice"><span>{pivotScenario.icon}</span><div><small>12개월 피벗 전략</small><strong>{pivotScenario.title}</strong><em>{pivotEffectTextForReport(pivotScenario)}</em></div></div>}
 
               <AssetChangeSummary team={team} className="mt-4" />
 
@@ -2287,6 +2290,14 @@ function ResultBoard({ rankedTeams, rankedInvestors, teams, students, room }) {
       </div>
     </section>
   );
+}
+
+function pivotEffectTextForReport(scenario) {
+  const primary = Number(scenario.primaryMultiplier || 1);
+  const effects = {
+    government_support: `F09 이벤트 ${primary}배`, professional_management: `최종 자산 ${Number(scenario.dilutionRate || 0)}% 지분 희석`, downsizing: `모든 이벤트 ${primary}배`, aggressive_expansion: `모든 이벤트 ${primary}배`, turnaround: "최저 등급 팩터 상향", early_exit: "13~24개월 자산 동결", global_expansion: `F01·F04 ${primary}배`, ip_protection: "F14 양호·도용 피해 완화", cofounder_reset: "팀 리스크 완화", crowdfunding: `시장 이벤트 ${primary}배`
+  };
+  return effects[scenario.id] || scenario.effectLabel || "";
 }
 
 function InvestorRanking({ investors = [], compact = false, currentUid = "" }) {

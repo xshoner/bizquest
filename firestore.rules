@@ -170,7 +170,7 @@ service cloud.firestore {
                 || (before.status in ['CARD_SELECT', 'IDEATION', 'AI_EVALUATION']
                     && (!('ideaLocked' in teamBefore) || teamBefore.ideaLocked != true)))
             && (!changedTeamKeys.hasAny(['aiEvaluation']) || teamAfter.aiEvaluation == null)
-            && (!changedTeamKeys.hasAny(['teamName']) || (teamAfter.teamName is string && teamAfter.teamName.size() <= 30))
+            && (!changedTeamKeys.hasAny(['teamName']) || (teamAfter.teamName is string && teamAfter.teamName.size() <= 10))
             && (!changedTeamKeys.hasAny(['mascot', 'teamSlogan', 'teamSetupComplete'])
                 || (before.status == 'WAITING'
                     && (!('mascot' in teamAfter) || teamAfter.mascot is string)

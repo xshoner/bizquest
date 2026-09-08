@@ -252,7 +252,7 @@ function StudentHeader({ room, uid, student }) {
 
   async function saveTeamName() {
     if (!student.team || !isLeader || savingRef.current) return;
-    const nextName = normalizeTeamName(name.trim() || myTeam.teamName).slice(0, 30);
+    const nextName = normalizeTeamName(name.trim() || myTeam.teamName).slice(0, 10);
     setEditing(false);
     if (nextName === myTeam.teamName) return;
     savingRef.current = true;
@@ -284,9 +284,9 @@ function StudentHeader({ room, uid, student }) {
           {myTeam && <MascotAvatar mascotId={myTeam.mascot} size="tiny" />}
           {isLeader && <Crown size={14} className="text-amber-300" />}
           {editing ? (
-            <input value={name} maxLength={30} onChange={(event) => setName(event.target.value)} onBlur={saveTeamName} onKeyDown={(event) => event.key === "Enter" && event.currentTarget.blur()} autoFocus />
+            <input value={name} maxLength={10} onChange={(event) => setName(event.target.value)} onBlur={saveTeamName} onKeyDown={(event) => event.key === "Enter" && event.currentTarget.blur()} autoFocus />
           ) : (
-            <strong className="truncate">{myTeam?.teamName || "팀 미선택"}</strong>
+            <strong>{myTeam?.teamName || "팀 미선택"}</strong>
           )}
           {isLeader && !editing && <button onClick={() => setEditing(true)} title="팀 이름 변경"><Pencil size={14} /></button>}
           </div>
@@ -328,7 +328,7 @@ function WaitingRoom({ room, uid }) {
   }
 
   async function saveTeamSetup() {
-    const nextName = normalizeTeamName(setupName).slice(0, 30);
+    const nextName = normalizeTeamName(setupName).slice(0, 10);
     const nextSlogan = slogan.trim().slice(0, 40);
     if (!nextName || !selectedMascotId || !nextSlogan) {
       setError("팀 이름, 마스코트, 팀 구호를 모두 정해 주세요.");
@@ -380,8 +380,8 @@ function WaitingRoom({ room, uid }) {
           {isLeader && !teamLocked ? (
             <>
               <label className="team-slogan-field team-name-field">
-                <span>팀 이름 <b>{setupName.length}/30</b></span>
-                <input value={setupName} maxLength={30} onChange={(event) => setSetupName(event.target.value)} placeholder="우리 회사의 팀 이름" />
+                <span>기업명 <b>{setupName.length}/10</b></span>
+                <input value={setupName} maxLength={10} onChange={(event) => setSetupName(event.target.value)} placeholder="10자 이내 기업명" />
               </label>
               <p className="team-identity-guide">팀을 표현하는 마스코트를 하나 골라 주세요.</p>
               <div className="mascot-picker" role="list" aria-label="회사 마스코트 선택">
@@ -1085,7 +1085,7 @@ function PivotVote({ room, uid, student }) {
   const winner = scenarios.find((scenario) => scenario.id === resolved);
 
   useEffect(() => { if (savedVote) setSelected(savedVote); }, [savedVote]);
-  useEffect(() => { const timer = window.setTimeout(() => setVisible(true), 1000); return () => window.clearTimeout(timer); }, []);
+  useEffect(() => { const timer = window.setTimeout(() => setVisible(true), 1050); return () => window.clearTimeout(timer); }, []);
 
   async function confirmVote() {
     if (!selected || savedVote || busy) return;
@@ -1108,15 +1108,19 @@ function PivotVote({ room, uid, student }) {
         <h2 id="pivot-vote-title">우리 회사의 미래를 선택하세요</h2>
         <p>우리 회사의 미래를 바꿀 아래 10개의 피벗 카드 중 하나를 고르세요. 모든 팀원이 투표하고 가장 높은 투표를 받은 카드가 자동으로 선택됩니다.</p>
         {resolved && <div className="pivot-resolved-banner"><span>{winner?.icon}</span><div><small>우리 팀 최종 선택</small><strong>{winner?.title || resolved}</strong></div></div>}
-        <div className="pivot-card-scroller" aria-label="피벗 카드 목록">
-          {scenarios.map((scenario) => {
-            const active = selected === scenario.id;
-            return (
-              <button key={scenario.id} type="button" disabled={Boolean(savedVote || resolved)} onClick={() => setSelected(scenario.id)} className={`pivot-card ${active ? "pivot-card-selected" : ""}`}>
-                <span className="pivot-card-icon">{scenario.icon}</span><small>{scenario.tone}</small><h3>{scenario.title}</h3><p>{scenario.summary}</p><dl><div><dt>즉시 효과</dt><dd>{pivotImmediateText(scenario)}</dd></div><div><dt>13~24개월</dt><dd>{pivotEffectText(scenario)}</dd></div></dl>{active && <b className="pivot-card-check"><Check size={16} /> 선택</b>}
-              </button>
-            );
-          })}
+        <div className="pivot-card-viewport">
+          <span className="pivot-scroll-arrow pivot-scroll-arrow-left" aria-hidden="true">‹</span>
+          <div className="pivot-card-scroller" aria-label="피벗 카드 목록">
+            {scenarios.map((scenario) => {
+              const active = selected === scenario.id;
+              return (
+                <button key={scenario.id} type="button" disabled={Boolean(savedVote || resolved)} onClick={() => setSelected(scenario.id)} className={`pivot-card ${active ? "pivot-card-selected" : ""}`}>
+                  <span className="pivot-card-icon">{scenario.icon}</span><small>{scenario.tone}</small><h3>{scenario.title}</h3><p>{scenario.summary}</p><dl><div><dt>즉시 효과</dt><dd>{pivotImmediateText(scenario)}</dd></div><div><dt>13~24개월</dt><dd>{pivotEffectText(scenario)}</dd></div></dl>{active && <b className="pivot-card-check"><Check size={16} /> 선택</b>}
+                </button>
+              );
+            })}
+          </div>
+          <span className="pivot-scroll-arrow pivot-scroll-arrow-right" aria-hidden="true">›</span>
         </div>
         <div className="pivot-scroll-hint">← 좌우로 밀어 10개 카드를 확인하세요 →</div>
         <ErrorBanner message={error} onDismiss={() => setError("")} />
@@ -1154,17 +1158,21 @@ function Simulation({ room, student }) {
   const impact = myTeam?.lastEventImpact;
   const impactRate = impact ? Number(impact.rate || 0) : 0;
   const impactAmount = impact ? Number(impact.afterAsset || 0) - Number(impact.beforeAsset || 0) : 0;
+  const totalDelta = displayAsset - startingTotal;
+  const totalRate = startingTotal ? (totalDelta / startingTotal) * 100 : 0;
+  const currentImpact = impact?.eventId === room.currentEvent?.id ? impact : null;
+  const assetToneNegative = currentImpact ? impactAmount < 0 : totalDelta < 0;
   return (
     <section>
-      <div className={`student-asset-pulse ${impactRate < 0 ? "student-asset-pulse-negative" : "student-asset-pulse-positive"}`}>
+      <div className={`student-asset-pulse ${assetToneNegative ? "student-asset-pulse-negative" : "student-asset-pulse-positive"}`}>
         <div>
           <p>우리 팀 현재 자산</p>
-          <strong>{formatWon(displayAsset)}</strong>
+          <RollingWon from={Number(currentImpact?.beforeAsset ?? displayAsset)} to={displayAsset} active={Boolean(currentImpact)} />
         </div>
         <div className="text-right">
-          <p>{room.currentMonth || 0}개월 차 변동</p>
-          <strong>{impact ? `${impactRate > 0 ? "+" : ""}${impactRate}%` : "대기"}</strong>
-          {impact && <span>{impactAmount >= 0 ? "+" : ""}{formatWon(impactAmount)}</span>}
+          <p>출발 총액 대비</p>
+          <strong>{totalRate >= 0 ? "+" : ""}{totalRate.toFixed(1)}%</strong>
+          <span>{room.currentMonth || 0}개월 · {impact ? `이번 달 ${impactRate > 0 ? "+" : ""}${impactRate}%` : "변동 대기"}</span>
         </div>
       </div>
       <div className={`rounded-lg p-5 text-white ${assetNegative ? "bg-rose-700" : "bg-slate-900"}`}>
@@ -1180,7 +1188,6 @@ function Simulation({ room, student }) {
           </div>
           <div className="rounded-lg bg-white/10 p-3"><p className="text-xs text-slate-200">투자 유치금</p><p className="text-xl font-black">{formatWon(investment)}</p></div>
         </div>
-        <div className="mt-5 rounded-lg bg-white p-4 text-slate-950"><p className="text-sm font-black text-slate-500">현재 우리 팀 총 자산</p><p className={`mt-1 text-4xl font-black ${assetNegative ? "text-rose-600" : "text-indigo-600"}`}>{formatWon(displayAsset)}</p></div>
       </div>
       {room.currentEvent && (
         <>
@@ -1232,7 +1239,6 @@ function StudentAiEvaluationReport({ team }) {
 }
 
 function StudentEventShowcase({ event, impact, month, team }) {
-  const [impactVisible, setImpactVisible] = useState(false);
   const activeImpact = impact?.eventId === event.id ? impact : null;
   const rate = activeImpact ? Number(activeImpact.rate || 0) : 0;
   const currentAsset = Number(team?.currentAsset ?? getTeamStartingCapital(team));
@@ -1240,6 +1246,9 @@ function StudentEventShowcase({ event, impact, month, team }) {
   const afterAsset = Number(activeImpact?.afterAsset ?? currentAsset);
   const changedAmount = afterAsset - beforeAsset;
   const changePct = beforeAsset ? Math.round(((afterAsset - beforeAsset) / beforeAsset) * 1000) / 10 : 0;
+  const startingTotal = getTeamStartingCapital(team);
+  const totalRate = startingTotal ? ((afterAsset - startingTotal) / startingTotal) * 100 : 0;
+  const changeIsNegative = activeImpact ? changedAmount < 0 : currentAsset < startingTotal;
   const history = Array.isArray(team?.assetHistory) ? team.assetHistory.slice(-6) : [];
   const graphValues = history.length > 1 ? history.map((item) => Number(item.asset || 0)) : [beforeAsset, afterAsset];
   const graphMin = Math.min(...graphValues);
@@ -1251,20 +1260,14 @@ function StudentEventShowcase({ event, impact, month, team }) {
     return `${x},${y}`;
   }).join(" ");
 
-  useEffect(() => {
-    setImpactVisible(false);
-    const timer = window.setTimeout(() => setImpactVisible(true), 1500);
-    return () => window.clearTimeout(timer);
-  }, [event.id, month]);
-
   return (
     <div className="student-event-showcase" key={`${month}-${event.id}`}>
       <div className="event-spark event-spark-one" />
       <div className="event-spark event-spark-two" />
       <div className="student-event-card-wrap">
         <EventCardVisual event={event}>
-          {impactVisible && activeImpact && (
-            <div className={`event-card-impact-float ${rate >= 0 ? "student-impact-positive" : "student-impact-negative"}`} role="status" aria-live="polite">
+          {activeImpact && (
+            <div key={`${month}-${event.id}-${afterAsset}`} className={`event-card-impact-float ${rate >= 0 ? "student-impact-positive" : "student-impact-negative"}`} role="status" aria-live="polite">
               <span>{rate >= 0 ? "▲" : "▼"}</span>
               <strong>{rate > 0 ? "+" : ""}{rate}%</strong>
               <small>{rate >= 0 ? "자산 증가" : "자산 감소"} · {activeImpact.grade}</small>
@@ -1272,11 +1275,11 @@ function StudentEventShowcase({ event, impact, month, team }) {
           )}
         </EventCardVisual>
       </div>
-      <div className={`student-event-asset-overlay ${activeImpact ? "student-event-asset-applied" : "student-event-asset-waiting"} ${changedAmount < 0 ? "student-event-asset-negative" : "student-event-asset-positive"}`}>
+      <div className={`student-event-asset-overlay ${activeImpact ? "student-event-asset-applied" : ""} ${changeIsNegative ? "student-event-asset-negative" : "student-event-asset-positive"}`}>
         <div>
           <p>{activeImpact ? "우리 팀 실시간 자산" : "현재 자산 현황"}</p>
           <RollingWon from={beforeAsset} to={afterAsset} active={Boolean(activeImpact)} />
-          {activeImpact && <span>{changedAmount >= 0 ? "+" : ""}{formatWon(changedAmount)} · {changePct >= 0 ? "+" : ""}{changePct}%</span>}
+          <span>{activeImpact ? `이번 달 ${changedAmount >= 0 ? "+" : ""}${formatWon(changedAmount)} · ${changePct >= 0 ? "+" : ""}${changePct}%` : "이번 달 이벤트 반영 중"}<br />출발 대비 {totalRate >= 0 ? "+" : ""}{totalRate.toFixed(1)}%</span>
         </div>
         <svg viewBox="0 0 100 56" role="img" aria-label="우리 팀 자산 변화 그래프">
           <polyline points={graphPoints} />
@@ -1292,7 +1295,7 @@ function RollingWon({ from, to, active }) {
     if (!active) { setValue(to); return undefined; }
     let frame = 0;
     const startedAt = performance.now();
-    const duration = 850;
+    const duration = 1000;
     const tick = (now) => {
       const progress = Math.min(1, (now - startedAt) / duration);
       const eased = 1 - Math.pow(1 - progress, 3);
