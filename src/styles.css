@@ -3146,6 +3146,14 @@ select {
   opacity: 1;
 }
 
+.ai-evaluation-showcase .event-showcase-stage::before {
+  animation-duration: 8s, 24s;
+}
+
+.ai-evaluation-showcase .event-spark {
+  animation-duration: 4.5s;
+}
+
 .ai-evaluation-stage {
   grid-template-columns: minmax(260px, 1fr) minmax(180px, 260px);
 }
@@ -6202,8 +6210,8 @@ select {
   font-size: 16px;
   font-weight: 1000;
   outline: none;
-  text-shadow: 0 2px 4px rgba(0,0,0,.32);
-  box-shadow: inset 0 2px 0 rgba(255,255,255,.38), inset 0 -4px 9px rgba(15,23,42,.18), 0 9px 20px var(--team-glow);
+  text-shadow: 0 1px 2px rgba(0,0,0,.22);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.24), 0 5px 12px var(--team-glow);
 }
 .admin-team-title-column > input:focus { background: white !important; color: #172033; text-shadow: none; box-shadow: 0 0 0 3px var(--team-glow); }
 
@@ -6261,43 +6269,41 @@ select {
 
 .admin-team-slogan-viewport {
   display: block !important;
+  position: relative;
   min-width: 0;
+  height: 1.45em;
   overflow: hidden;
   border-radius: 0 !important;
   padding: 2px 0 !important;
   background: transparent !important;
 }
 
-.admin-team-slogan-track {
-  display: flex !important;
+.admin-team-slogan-runner {
+  position: absolute;
+  top: 0;
+  left: 0;
   width: max-content;
-  gap: 48px;
-  padding: 0 !important;
-  background: transparent !important;
-  color: #334155 !important;
-  animation: team-slogan-marquee 14s linear infinite;
-  will-change: transform;
-}
-
-.admin-team-slogan-track strong {
-  flex: none;
   white-space: nowrap;
   color: #334155;
   font-size: 12px;
   line-height: 1.4;
   font-weight: 900;
+  animation: team-slogan-marquee 14s linear infinite;
+  will-change: left, transform;
 }
 
 @keyframes team-slogan-marquee {
-  from { transform: translateX(calc(-50% - 24px)); }
-  to { transform: translateX(0); }
+  from { left: 0; transform: translateX(-100%); }
+  to { left: 100%; transform: translateX(0); }
 }
 
 .waiting-team-title { min-width: 0; }
 .waiting-team-title p { display: -webkit-box; min-width: 0; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; overflow-wrap: anywhere; line-height: 1.2; }
 .student-team-name-row strong { display: -webkit-box; min-width: 0; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; overflow-wrap: anywhere; line-height: 1.15; }
 
-@media (prefers-reduced-motion: reduce) { .admin-team-slogan-track { animation: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .admin-team-slogan-runner { position: static; animation: none; }
+}
 
 .admin-team-members {
   display: flex;
@@ -6456,5 +6462,120 @@ select {
 
   .admin-dashboard .event-notice strong {
     font-size: 11px;
+  }
+}
+
+/* Final report: a richer investment leaderboard without duplicating the pivot summary. */
+.report-board .investor-ranking {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  border-color: rgba(52, 211, 153, 0.38);
+  color: white;
+  background:
+    radial-gradient(circle at 88% 22%, rgba(250, 204, 21, 0.24), transparent 24%),
+    linear-gradient(135deg, #052e2b, #065f46 50%, #0f766e);
+  box-shadow: 0 22px 52px rgba(6, 78, 59, 0.25);
+}
+
+.report-board .investor-ranking::before {
+  content: "₩";
+  position: absolute;
+  z-index: -1;
+  right: 3%;
+  top: -48px;
+  color: rgba(255, 255, 255, 0.085);
+  font-size: 190px;
+  line-height: 1;
+  font-weight: 1000;
+  transform: rotate(-10deg);
+}
+
+.report-board .investor-ranking::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  background: repeating-linear-gradient(115deg, transparent 0 38px, rgba(255,255,255,.025) 39px 40px);
+}
+
+.report-board .investor-ranking-heading { color: #fff; }
+.report-board .investor-ranking-heading p { color: #6ee7b7; letter-spacing: .16em; }
+.report-board .investor-ranking-heading svg { color: #fde68a; filter: drop-shadow(0 5px 8px rgba(245,158,11,.35)); }
+.report-board .investor-ranking-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.report-board .investor-ranking-list > div {
+  border: 1px solid rgba(255,255,255,.22);
+  background: rgba(255,255,255,.94);
+  box-shadow: 0 10px 24px rgba(2,44,34,.2);
+}
+.report-board .investor-ranking-list .investor-top-1 {
+  border-color: #fcd34d;
+  background: linear-gradient(135deg,#fff7d6,#fef3c7);
+  box-shadow: 0 12px 30px rgba(245,158,11,.25);
+}
+.report-board .investor-ranking-empty { color: #d1fae5; }
+
+/* Detailed TOP 3 cards follow the same narrative order used in each team report. */
+.report-top3-section {
+  margin-top: 24px;
+  border-radius: 24px;
+  padding: 22px;
+  background: linear-gradient(145deg,#f8fafc,#eef2ff);
+  box-shadow: inset 0 0 0 1px rgba(79,70,229,.1);
+}
+
+.report-top3-heading > span { color: #4f46e5; font-size: 11px; font-weight: 1000; letter-spacing: .15em; }
+.report-top3-heading h3 { margin-top: 2px; font-size: 25px; font-weight: 1000; }
+.report-top3-heading p { margin-top: 2px; color: #64748b; font-size: 13px; font-weight: 700; }
+.report-top3-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px; margin-top: 16px; }
+
+.report-top-team-card {
+  min-width: 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 20px;
+  padding: 17px;
+  background: rgba(255,255,255,.94);
+  box-shadow: 0 14px 34px rgba(15,23,42,.08);
+  break-inside: avoid;
+}
+
+.report-top-team-1 {
+  grid-column: 1 / -1;
+  border-color: #fcd34d;
+  background: linear-gradient(145deg,#fffbeb,#fff 48%,#fff7ed);
+  box-shadow: 0 18px 42px rgba(245,158,11,.18);
+}
+.report-top-team-2 { border-color: #cbd5e1; }
+.report-top-team-3 { border-color: #fdba74; }
+.report-top-team-head { display: flex; align-items: center; gap: 12px; }
+.report-top-team-head > div { min-width: 0; }
+.report-top-team-head small { color: #6366f1; font-size: 10px; font-weight: 1000; letter-spacing: .08em; }
+.report-top-team-head h3 { overflow: hidden; margin-top: 1px; font-size: clamp(21px,2.5vw,31px); font-weight: 1000; text-overflow: ellipsis; white-space: nowrap; }
+.report-top-team-head p { overflow-wrap: anywhere; color: #64748b; font-size: 13px; font-weight: 800; }
+.report-top-team-members { margin-top: 13px; border-radius: 14px; padding: 11px 13px; background: #f8fafc; }
+.report-top-team-members > div { display: flex; flex-wrap: wrap; gap: 6px; }
+.report-top-team-assets { margin-top: 12px; }
+.report-top-team-ai { margin-top: 12px; border: 1px solid #e0e7ff; border-radius: 15px; padding: 13px 14px; background: linear-gradient(135deg,#f5f3ff,#eef2ff); }
+.report-top-team-ai-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.report-top-team-ai-heading .report-block-title { margin-bottom: 0; color: #4338ca; }
+.report-top-team-ai > p { margin-top: 8px; color: #475569; font-size: 13px; font-weight: 700; line-height: 1.65; }
+.report-top-team-card .report-pivot-choice { margin-top: 12px; }
+.report-team-card > .asset-change-summary { margin-top: 14px; }
+.report-team-card > .report-pivot-choice { margin-top: 14px; }
+
+@media (max-width: 760px) {
+  .report-board .investor-ranking-list,
+  .report-top3-grid { grid-template-columns: 1fr; }
+  .report-top-team-1 { grid-column: auto; }
+  .report-top3-section { padding: 16px; }
+  .report-top-team-card { padding: 14px; }
+}
+
+@media print {
+  .report-board .investor-ranking,
+  .report-top3-section,
+  .report-top-team-card {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
 }

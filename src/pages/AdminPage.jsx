@@ -81,7 +81,7 @@ import heroBackgroundImage from "../images/landing-hero-ai-v2.webp";
 import processRoadmapImage from "../images/landing-process-roadmap.webp";
 import { AiEvaluationShowcase, EventCardVisual, FanfareOnResult, ResultFinalizingShowcase, ResultFireworks } from "../components/shared/Effects.jsx";
 import { AssetChangeSummary, AssetTrendChart, gradeClassName } from "../components/shared/AssetCharts.jsx";
-import { installAudioUnlock, playSimulationFinale, playWhoosh } from "../lib/audio.js";
+import { installAudioUnlock, playPivotTransition, playSimulationFinale, playWhoosh } from "../lib/audio.js";
 import { MascotAvatar } from "../components/shared/MascotAvatar.jsx";
 import { PHASE_TIMER_PRESETS_MIN, PhaseTimerDisplay } from "../components/shared/PhaseTimer.jsx";
 import { buildFullCsv, buildRoomJson, downloadTextFile, safeFileName } from "../lib/exportReport.js";
@@ -592,9 +592,13 @@ export default function AdminPage() {
 
   useEffect(() => {
     if (!["voting", "ready"].includes(room?.pivotPhase)) { setPivotUiVisible(false); return undefined; }
-    const timer = window.setTimeout(() => setPivotUiVisible(true), 3500);
+    if (pivotUiVisible) return undefined;
+    const timer = window.setTimeout(() => {
+      setPivotUiVisible(true);
+      playPivotTransition();
+    }, 3500);
     return () => window.clearTimeout(timer);
-  }, [room?.pivotPhase]);
+  }, [room?.pivotPhase, pivotUiVisible]);
 
   useEffect(() => () => {
     clearSimulationTimers();
@@ -1676,11 +1680,9 @@ function getStudentOrigin(localNetworkHost) {
 function getTeamGradientStyle(teamKey) {
   const seed = [...String(teamKey || "team")].reduce((total, character) => total + character.charCodeAt(0) * 17, 0);
   const hue = seed % 360;
-  const secondHue = (hue + 42) % 360;
-  const thirdHue = (hue + 86) % 360;
   return {
-    "--team-gradient": `linear-gradient(135deg, hsl(${hue} 76% 42%), hsl(${secondHue} 82% 54%) 56%, hsl(${thirdHue} 88% 62%))`,
-    "--team-glow": `hsl(${secondHue} 78% 48% / 0.34)`
+    "--team-gradient": `linear-gradient(135deg, hsl(${hue} 58% 39%), hsl(${hue} 62% 55%))`,
+    "--team-glow": `hsl(${hue} 54% 42% / 0.2)`
   };
 }
 
@@ -1720,10 +1722,7 @@ function TeamGrid({ roomStatus, teams, students, onOpenStudentMenu, onRenameTeam
                   <span>팀 구호</span>
                   {team.teamSlogan ? (
                     <span className="admin-team-slogan-viewport" aria-label={team.teamSlogan}>
-                      <span className="admin-team-slogan-track" aria-hidden="true">
-                        <strong>{team.teamSlogan}</strong>
-                        <strong>{team.teamSlogan}</strong>
-                      </span>
+                      <strong className="admin-team-slogan-runner" aria-hidden="true">{team.teamSlogan}</strong>
                     </span>
                   ) : <strong>아직 팀 구호를 정하지 않았습니다.</strong>}
                 </p>
@@ -2196,9 +2195,50 @@ function PivotReportBadge({ team, settings, compact = false }) {
   );
 }
 
+function TopTeamReportCard({ team, place, students, settings }) {
+  const members = getStudentsByTeam(students, team.key);
+  return (
+    <article className={`report-top-team-card report-top-team-${place}`}>
+      <header className="report-top-team-head">
+        <span className={`rank-medal rank-medal-lg rank-medal-${place}`}>{place}</span>
+        <div>
+          <small>{place}위 팀</small>
+          <h3>{team.teamName}</h3>
+          <p>{team.teamSlogan ? `“${team.teamSlogan}”` : "팀 구호 미정"}</p>
+        </div>
+      </header>
+
+      <section className="report-top-team-members">
+        <p className="report-block-title"><Users size={14} /> 팀원 {members.length}명</p>
+        <div>
+          {members.map((member) => (
+            <span key={member.uid} className="report-member-chip">
+              {team.leaderId === member.uid && <Crown size={12} className="text-amber-500" />}
+              {member.nickname}
+              {member.cLevelResult?.key && <b className={`c-level-mini-badge c-level-mini-${member.cLevelResult.key}`}>{member.cLevelResult.key}</b>}
+            </span>
+          ))}
+          {members.length === 0 && <span className="text-sm text-slate-400">팀원 없음</span>}
+        </div>
+      </section>
+
+      <AssetChangeSummary team={team} className="report-top-team-assets" featured={place === 1} />
+
+      <section className="report-top-team-ai">
+        <div className="report-top-team-ai-heading">
+          <p className="report-block-title"><ClipboardCheck size={14} /> 사업계획 AI 평가 결과</p>
+          <AiGradeTally team={team} />
+        </div>
+        <p>{team.aiEvaluation?.opinion || "AI 평가 의견이 없습니다."}</p>
+      </section>
+
+      <PivotReportBadge team={team} settings={settings} />
+      <AssetTrendChart team={team} className="mt-4" />
+    </article>
+  );
+}
+
 function ResultBoard({ rankedTeams, rankedInvestors, teams, students, room }) {
-  const winner = rankedTeams[0];
-  const podium = [rankedTeams[1], rankedTeams[0], rankedTeams[2]];
   const participantCount = Object.keys(students).length;
   const totalFinal = rankedTeams.reduce((sum, team) => sum + Number(team.currentAsset || 0), 0);
   const totalInitial = rankedTeams.reduce((sum, team) => sum + getAssetChange(team).initial, 0);
@@ -2237,56 +2277,20 @@ function ResultBoard({ rankedTeams, rankedInvestors, teams, students, room }) {
 
       <InvestorRanking investors={rankedInvestors} />
 
-      <section className="result-pivot-summary">
-        <div className="result-analysis-heading"><span>PIVOT STRATEGY</span><h3>팀별 선택 피벗 카드</h3></div>
-        <div>
-          {rankedTeams.map((team) => <PivotReportBadge key={team.key} team={team} settings={room.simulationSettings} compact />)}
-        </div>
-      </section>
-
-      {winner && (
-        <article className="winner-report-card mt-5 overflow-hidden rounded-lg bg-gradient-to-br from-amber-300 via-orange-500 to-rose-600 p-1 shadow-[0_18px_45px_rgba(245,158,11,0.35)]">
-          <div className="rounded-lg bg-white/95 p-5">
-            <div className="winner-crown-badge"><Crown size={42} /><span>1위 팀</span></div>
-            <div className="mt-2 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-              <div className="min-w-0">
-                <h3 className="text-4xl font-black text-slate-950">{winner.teamName}</h3>
-                <p className="mt-2 text-base font-black text-indigo-700">{winner.idea?.serviceName || winner.idea?.product || "사업 아이디어"}</p>
-                {winner.idea?.tagline && <p className="mt-1 text-sm font-bold text-slate-500">“{winner.idea.tagline}”</p>}
-                <PivotReportBadge team={winner} settings={room.simulationSettings} />
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {winner.diversity && <span className={`diversity-badge diversity-badge-${winner.diversity.key}`}><Sparkles size={13} /> {winner.diversity.label} <b>{winner.diversity.rate > 0 ? "+" : ""}{winner.diversity.rate}%</b></span>}
-                  <AiGradeTally team={winner} />
-                </div>
-              </div>
-              <AssetChangeSummary team={winner} featured />
-            </div>
-            <AssetTrendChart team={winner} className="mt-4" />
+      {rankedTeams.length > 0 && (
+        <section className="report-top3-section">
+          <div className="report-top3-heading"><span>TOP 3 TEAMS</span><h3>최종 TOP3 팀</h3><p>팀 구성부터 자산 변화, AI 평가와 피벗 전략까지 한눈에 확인하세요.</p></div>
+          <div className="report-top3-grid">
+            {rankedTeams.slice(0, 3).map((team, index) => (
+              <TopTeamReportCard key={team.key} team={team} place={index + 1} students={students} settings={room.simulationSettings} />
+            ))}
           </div>
-        </article>
+        </section>
       )}
-
-      <div className="report-podium mt-5">
-        {podium.map((team, index) => {
-          if (!team) return <div key={index} />;
-          const place = index === 1 ? 1 : index === 0 ? 2 : 3;
-          const change = getAssetChange(team);
-          return (
-            <div key={team.key} className={`report-podium-step report-podium-${place}`}>
-              <span className={`rank-medal rank-medal-${place}`}>{place}</span>
-              <p className="report-podium-name">{team.teamName}</p>
-              <p className={`report-podium-asset ${change.positive ? "text-emerald-600" : "text-rose-600"}`}>{formatWon(change.final)}</p>
-              <p className={`report-podium-rate ${change.positive ? "report-rate-up" : "report-rate-down"}`}>{change.positive ? "▲ +" : "▼ "}{change.rate.toFixed(1)}%</p>
-            </div>
-          );
-        })}
-      </div>
 
       <div className="mt-6 grid gap-4">
         {rankedTeams.map((team, index) => {
-          const change = getAssetChange(team);
           const members = getStudentsByTeam(students, team.key);
-          const pivotScenario = getPivotScenario(room.simulationSettings, team.pivotScenarioId || team.pivotModifiers?.scenarioId || team.midDecision?.resolvedScenario);
           return (
             <article key={team.key} className={`report-team-card ${index === 0 ? "report-team-card-winner" : ""}`}>
               <div className="report-team-head">
@@ -2294,17 +2298,11 @@ function ResultBoard({ rankedTeams, rankedInvestors, teams, students, room }) {
                   <span className={`rank-medal rank-medal-lg rank-medal-${Math.min(index + 1, 4)}`}>{index + 1}</span>
                   <div className="min-w-0">
                     <h3 className="truncate text-xl font-black">{team.teamName}</h3>
-                    <p className="truncate text-sm font-bold text-indigo-700">{team.idea?.serviceName || team.idea?.product || "사업 아이디어 미작성"}</p>
+                    <p className="truncate text-sm font-bold text-indigo-700">{team.teamSlogan ? `“${team.teamSlogan}”` : "팀 구호 미정"}</p>
+                    <p className="truncate text-xs font-bold text-slate-500">{team.idea?.serviceName || team.idea?.product || "사업 아이디어 미작성"}</p>
                   </div>
                 </div>
-                <div className={`report-final-asset ${change.positive ? "report-final-up" : "report-final-down"}`}>
-                  <p>최종 총 자산</p>
-                  <strong>{formatWon(change.final)}</strong>
-                  <span>{change.positive ? "▲ +" : "▼ "}{formatWon(change.delta)} ({change.positive ? "+" : ""}{change.rate.toFixed(1)}%)</span>
-                </div>
               </div>
-
-              {pivotScenario && <PivotReportBadge team={team} settings={room.simulationSettings} />}
 
               <AssetChangeSummary team={team} className="mt-4" />
 
@@ -2340,14 +2338,10 @@ function ResultBoard({ rankedTeams, rankedInvestors, teams, students, room }) {
                   <p className="report-block-title"><ClipboardCheck size={14} /> AI 평가</p>
                   <AiGradeTally team={team} />
                   <p className="mt-2 text-sm leading-6 text-slate-600">{team.aiEvaluation?.opinion || "AI 평가 의견이 없습니다."}</p>
-                  <div className="report-capital mt-3">
-                    <span>기본 자산 {formatWon(getTeamBaseAsset(team))}</span>
-                    <span>투자 유치 {formatWon(team.investmentsReceived || 0)}</span>
-                    <span>총액 {formatWon(getTeamBaseAsset(team) + Number(team.investmentsReceived || 0))}</span>
-                  </div>
                 </div>
               </div>
 
+              <PivotReportBadge team={team} settings={room.simulationSettings} />
               <AssetTrendChart team={team} className="mt-4" />
             </article>
           );

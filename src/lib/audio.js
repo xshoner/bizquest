@@ -124,3 +124,24 @@ export function playWhoosh() {
     oscillator.stop(now + 0.38);
   });
 }
+
+/** Short rising cue used when the 12-month pivot cards enter the screen. */
+export function playPivotTransition() {
+  withContext((ctx, now) => {
+    const notes = [293.66, 440, 659.25];
+    notes.forEach((frequency, index) => {
+      const oscillator = ctx.createOscillator();
+      const gain = ctx.createGain();
+      oscillator.type = index === 2 ? "sine" : "triangle";
+      oscillator.frequency.setValueAtTime(frequency, now + index * 0.11);
+      oscillator.frequency.exponentialRampToValueAtTime(frequency * 1.08, now + index * 0.11 + 0.3);
+      gain.gain.setValueAtTime(0.0001, now + index * 0.11);
+      gain.gain.exponentialRampToValueAtTime(0.14, now + index * 0.11 + 0.025);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + index * 0.11 + 0.42);
+      oscillator.connect(gain);
+      gain.connect(ctx.destination);
+      oscillator.start(now + index * 0.11);
+      oscillator.stop(now + index * 0.11 + 0.45);
+    });
+  });
+}

@@ -29,6 +29,7 @@ import { AiEvaluationShowcase, EventCardVisual, ResultFinalizingShowcase, Result
 import { AssetChangeSummary, AssetTrendChart, gradeClassName } from "../components/shared/AssetCharts.jsx";
 import { MascotAvatar } from "../components/shared/MascotAvatar.jsx";
 import { TEAM_MASCOTS } from "../lib/mascots.js";
+import { installAudioUnlock, playPivotTransition } from "../lib/audio.js";
 
 const BUDGET = INVESTMENT_BUDGET;
 
@@ -69,6 +70,8 @@ export default function StudentPage() {
   const [refreshKey, setRefreshKey] = useState(0);
   const { room, loading, error } = useRoom(roomId, ownerUid, refreshKey);
   const [nickname, setNickname] = useState("");
+
+  useEffect(() => installAudioUnlock(), []);
 
   // Phones suspend the realtime connection while asleep. Re-subscribe whenever the page becomes
   // visible again (or the network comes back) so the current phase is loaded automatically.
@@ -1090,7 +1093,10 @@ function PivotVote({ room, uid, student }) {
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    const timer = window.setTimeout(() => setVisible(true), 3500);
+    const timer = window.setTimeout(() => {
+      setVisible(true);
+      playPivotTransition();
+    }, 3500);
     return () => {
       window.clearTimeout(timer);
       document.body.style.overflow = previousOverflow;
