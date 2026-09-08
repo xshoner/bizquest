@@ -48,11 +48,12 @@ function TeamCardBody({ team, place, members, settings }) {
 }
 
 function TeamCardHeading({ team, place, collapsed = false }) {
-  return <div className="student-ranked-team-open"><span className={`student-rank-badge student-rank-badge-${place}`}><Award size={18} /> {place}위</span><div className="student-ranked-team-name"><h3>{team.teamName}</h3><p>{team.teamSlogan ? `“${team.teamSlogan}”` : "팀 구호 미정"}</p></div>{collapsed && <span className="result-disclosure-label">펼쳐보기</span>}</div>;
+  const tone = Math.min(place, 4);
+  return <div className="student-ranked-team-open"><span className={`student-rank-badge student-rank-badge-${tone}`}><Award size={18} /> {place}위</span><div className="student-ranked-team-name"><h3>{team.teamName}</h3><p>{team.teamSlogan ? `“${team.teamSlogan}”` : "팀 구호 미정"}</p></div>{collapsed && <span className="result-disclosure-label">펼쳐보기</span>}</div>;
 }
 
 function TeamResultCard({ team, place, members, settings }) {
-  if (place > 1) return <details className={`student-ranked-team-card student-ranked-team-${place} result-collapsible-card`}><summary><TeamCardHeading team={team} place={place} collapsed /></summary><div className="result-collapsible-body"><TeamCardBody team={team} place={place} members={members} settings={settings} /></div></details>;
+  if (place > 1) return <details className={`student-ranked-team-card student-ranked-team-${Math.min(place, 4)} result-collapsible-card`}><summary><TeamCardHeading team={team} place={place} collapsed /></summary><div className="result-collapsible-body"><TeamCardBody team={team} place={place} members={members} settings={settings} /></div></details>;
   return <article className="student-ranked-team-card student-ranked-team-1"><TeamCardHeading team={team} place={place} /><TeamCardBody team={team} place={place} members={members} settings={settings} /></article>;
 }
 
@@ -79,6 +80,35 @@ export default function StudentResult({ room, student }) {
   const rankedTeams = useMemo(() => rankTeams(room.teams), [room.teams]);
   const rankedInvestors = useMemo(() => rankInvestors(room.students, room.teams), [room.students, room.teams]);
   const insights = useMemo(() => buildResultInsights(room.teams), [room.teams]);
-  if (tab === "investor") return <section><ResultTabs tab={tab} setTab={setTab} /><StudentInvestorView room={room} student={student} investors={rankedInvestors} /></section>;
-  return <section className="student-result-screen"><ResultTabs tab={tab} setTab={setTab} /><h2 className="text-2xl font-black">최종 순위 및 사업 리포트</h2><CompanyRankList rankedTeams={rankedTeams} myTeamKey={student.team} /><section className="result-analysis-dashboard student-result-dashboard"><div className="result-analysis-heading"><span>DATA BADGES</span><h3>최종 분석 대시보드</h3></div><div className="result-analysis-grid">{insights.map((insight) => <article key={insight.label}><span>{insight.icon}</span><div><p>{insight.label}</p><strong>{insight.value} <em>(최종결과 {insight.rank}위)</em></strong></div></article>)}</div></section><section className="student-result-group"><h3>최종 TOP3 팀 세부내역</h3><p>2위와 3위 팀은 눌러서 세부내역을 확인할 수 있습니다.</p><div className="student-top3-grid">{rankedTeams.slice(0, 3).map((team, index) => <TeamResultCard key={team.key} team={team} place={index + 1} members={getStudentsByTeam(room.students, team.key)} settings={room.simulationSettings} />)}</div></section></section>;
+  const myIndex = rankedTeams.findIndex((team) => team.key === student.team);
+  const myTeam = myIndex >= 0 ? rankedTeams[myIndex] : null;
+
+  if (tab === "investor") {
+    return <section><ResultTabs tab={tab} setTab={setTab} /><StudentInvestorView room={room} student={student} investors={rankedInvestors} /></section>;
+  }
+
+  return (
+    <section className="student-result-screen">
+      <ResultTabs tab={tab} setTab={setTab} />
+      <h2 className="text-2xl font-black">최종 순위 및 사업 리포트</h2>
+      <CompanyRankList rankedTeams={rankedTeams} myTeamKey={student.team} />
+      <section className="result-analysis-dashboard student-result-dashboard">
+        <div className="result-analysis-heading"><span>DATA BADGES</span><h3>최종 분석 대시보드</h3></div>
+        <div className="result-analysis-grid">{insights.map((insight) => <article key={insight.label}><span>{insight.icon}</span><div><p>{insight.label}</p><strong>{insight.value} <em>(최종결과 {insight.rank}위)</em></strong></div></article>)}</div>
+      </section>
+      <section className="student-result-group">
+        <h3>최종 TOP3 팀 세부내역</h3>
+        <p>2위와 3위 팀은 눌러서 세부내역을 확인할 수 있습니다.</p>
+        <div className="student-top3-grid">
+          {rankedTeams.slice(0, 3).map((team, index) => <TeamResultCard key={team.key} team={team} place={index + 1} members={getStudentsByTeam(room.students, team.key)} settings={room.simulationSettings} />)}
+          {myTeam && myIndex >= 3 && (
+            <div className="student-own-result">
+              <p>우리 팀 결과</p>
+              <TeamResultCard team={myTeam} place={myIndex + 1} members={getStudentsByTeam(room.students, myTeam.key)} settings={room.simulationSettings} />
+            </div>
+          )}
+        </div>
+      </section>
+    </section>
+  );
 }

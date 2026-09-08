@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Check, RotateCcw } from "lucide-react";
 import { PIVOT_SCENARIOS } from "../../data/simulationSettings.js";
@@ -37,6 +37,9 @@ function effectText(scenario) {
 
 export default function PivotVoteStage({ room, uid, student }) {
   const [visible, setVisible] = useState(false);
+  const scrollerRef = useRef(null);
+  const dragRef = useRef(null);
+  const draggedRef = useRef(false);
   const team = room.teams?.[student.team];
   const scenarios = room.simulationSettings?.pivotScenarios || PIVOT_SCENARIOS;
   const savedVote = team?.midDecision?.votes?.[uid] || "";
@@ -57,6 +60,41 @@ export default function PivotVoteStage({ room, uid, student }) {
     return () => { window.clearTimeout(timer); document.body.style.overflow = previousOverflow; };
   }, []);
 
+  function scrollCards(direction) {
+    const scroller = scrollerRef.current;
+    if (!scroller) return;
+    scroller.scrollBy({ left: direction * Math.max(240, scroller.clientWidth * 0.78), behavior: "smooth" });
+  }
+
+  function startMouseDrag(event) {
+    if (event.pointerType !== "mouse" || event.button !== 0) return;
+    dragRef.current = { pointerId: event.pointerId, startX: event.clientX, scrollLeft: event.currentTarget.scrollLeft };
+    draggedRef.current = false;
+  }
+
+  function moveMouseDrag(event) {
+    if (!dragRef.current || dragRef.current.pointerId !== event.pointerId) return;
+    const distance = event.clientX - dragRef.current.startX;
+    if (Math.abs(distance) > 5 && !draggedRef.current) {
+      draggedRef.current = true;
+      event.currentTarget.setPointerCapture(event.pointerId);
+    }
+    event.currentTarget.scrollLeft = dragRef.current.scrollLeft - distance;
+  }
+
+  function endMouseDrag(event) {
+    if (!dragRef.current || dragRef.current.pointerId !== event.pointerId) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    dragRef.current = null;
+    window.setTimeout(() => { draggedRef.current = false; }, 0);
+  }
+
+  function blockDraggedClick(event) {
+    if (!draggedRef.current) return;
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
   async function confirmVote() {
     if (!selected || savedVote || busy) return;
     setBusy(true); setError("");
@@ -73,7 +111,25 @@ export default function PivotVoteStage({ room, uid, student }) {
     <h2 id="pivot-vote-title">우리 회사의 미래를 선택하세요</h2>
     <p>우리 회사의 미래를 바꿀 아래 10개의 피벗 카드 중 하나를 고르세요. 모든 팀원이 투표하고 가장 높은 투표를 받은 카드가 자동으로 선택됩니다.</p>
     {resolved && <div className="pivot-resolved-banner"><span>{winner?.icon}</span><div><small>우리 팀 최종 선택</small><strong>{winner?.title || resolved}</strong></div></div>}
-    <div className="pivot-card-viewport"><span className="pivot-scroll-arrow pivot-scroll-arrow-left" aria-hidden="true">‹</span><div className="pivot-card-scroller" aria-label="피벗 카드 목록">{scenarios.map((scenario, index) => { const active = selected === scenario.id; return <button key={scenario.id} type="button" disabled={Boolean(savedVote || resolved)} onClick={() => setSelected(scenario.id)} className={`pivot-card pivot-card-tone-${index % 10} ${active ? "pivot-card-selected" : ""}`}><span className="pivot-card-icon">{scenario.icon}</span><small>{scenario.tone}</small><h3>{scenario.title}</h3><p>{scenario.summary}</p><dl><div><dt>즉시 효과</dt><dd>{immediateText(scenario)}</dd></div><div><dt>13~24개월</dt><dd>{effectText(scenario)}</dd></div></dl>{active && <b className="pivot-card-check"><Check size={16} /> 선택</b>}</button>; })}</div><span className="pivot-scroll-arrow pivot-scroll-arrow-right" aria-hidden="true">›</span></div>
+    <div className="pivot-card-viewport">
+      <button type="button" className="pivot-scroll-arrow pivot-scroll-arrow-left" onClick={() => scrollCards(-1)} aria-label="이전 피벗 카드">‹</button>
+      <div
+        ref={scrollerRef}
+        className="pivot-card-scroller"
+        aria-label="피벗 카드 목록"
+        onPointerDown={startMouseDrag}
+        onPointerMove={moveMouseDrag}
+        onPointerUp={endMouseDrag}
+        onPointerCancel={endMouseDrag}
+        onClickCapture={blockDraggedClick}
+      >
+        {scenarios.map((scenario, index) => {
+          const active = selected === scenario.id;
+          return <button key={scenario.id} type="button" disabled={Boolean(savedVote || resolved)} onClick={() => setSelected(scenario.id)} className={`pivot-card pivot-card-tone-${index % 10} ${active ? "pivot-card-selected" : ""}`}><span className="pivot-card-icon">{scenario.icon}</span><small>{scenario.tone}</small><h3>{scenario.title}</h3><p>{scenario.summary}</p><dl><div><dt>즉시 효과</dt><dd>{immediateText(scenario)}</dd></div><div><dt>13~24개월</dt><dd>{effectText(scenario)}</dd></div></dl>{active && <b className="pivot-card-check"><Check size={16} /> 선택</b>}</button>;
+        })}
+      </div>
+      <button type="button" className="pivot-scroll-arrow pivot-scroll-arrow-right" onClick={() => scrollCards(1)} aria-label="다음 피벗 카드">›</button>
+    </div>
     <div className="pivot-scroll-hint">← 좌우로 밀어 10개 카드를 확인하세요 →</div>
     <ErrorBanner message={error} onDismiss={() => setError("")} />
     <button type="button" disabled={!selected || Boolean(savedVote) || busy} onClick={confirmVote} className="pivot-confirm-button">{savedVote ? "선택 확정 완료 · 변경할 수 없음" : busy ? "확정 중..." : "이 카드로 투표 확정"}</button>

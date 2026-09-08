@@ -31,8 +31,20 @@ export function Simulation({ room, student }) {
 }
 
 export function StudentAiEvaluationReport({ team }) {
-  const evaluation = team.aiEvaluation;
-  return <article className="mt-4 rounded-lg bg-white p-4 shadow-lift"><p className="text-sm font-black text-indigo-600">AI 평가결과</p><h3 className="mt-1 break-keep text-xl font-black">{team.teamName} 사업계획 리포트</h3>{team.idea?.serviceName && <p className="mt-1 text-sm font-bold text-slate-600"><span className="text-slate-400">제품 및 서비스명</span> · {team.idea.serviceName}</p>}<p className="mt-3 rounded-lg bg-indigo-50 p-3 text-sm font-bold leading-6 text-indigo-800">{evaluation?.opinion || "아직 평가 의견이 없습니다."}</p><div className="mt-3 grid gap-2">{BUSINESS_FACTORS.map((factor) => { const item = getEvaluationFactor(team, factor.id); return <div key={factor.id} className="rounded-lg border border-slate-200 p-3 text-sm"><div className="flex items-center justify-between gap-2"><b className="break-keep">{factor.name}</b><span className={`rounded-full px-3 py-1 text-xs font-black ${gradeClassName(item?.grade || "보통")}`}>{item?.grade || "보통"}</span></div><p className="mt-1 text-xs leading-5 text-slate-600">{item?.reason || factor.description}</p></div>; })}</div></article>;
+  return (
+    <article className="student-ai-report-compact">
+      <div className="student-ai-report-heading">
+        <div><p>AI 평가 결과</p><h3>{team.teamName} 사업계획</h3></div>
+        {team.idea?.serviceName && <span>{team.idea.serviceName}</span>}
+      </div>
+      <div className="student-ai-grade-list">
+        {BUSINESS_FACTORS.map((factor) => {
+          const grade = getEvaluationFactor(team, factor.id)?.grade || "보통";
+          return <div key={factor.id}><span>{factor.name}</span><b className={gradeClassName(grade)}>{grade}</b></div>;
+        })}
+      </div>
+    </article>
+  );
 }
 
 function StudentEventShowcase({ event, impact, month, team, simulationSettings }) {

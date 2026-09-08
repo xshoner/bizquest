@@ -850,7 +850,7 @@ export default function AdminPage() {
 
   async function updateStatus(status) {
     if (!roomId) return;
-    if (status === STATUSES.C_LEVEL || status === STATUSES.CARD_SELECT) {
+    if ((room?.status === STATUSES.WAITING && status !== STATUSES.WAITING) || status === STATUSES.C_LEVEL || status === STATUSES.CARD_SELECT) {
       const activeTeams = Object.entries(teams).filter(([teamKey]) =>
         Object.values(students).some((student) => student.team === teamKey)
       );
@@ -871,6 +871,15 @@ export default function AdminPage() {
       if (missingLeader) {
         await updateRoom({
           sysMessage: "팀장을 지정하세요. 참가자가 있는 모든 팀에 팀장이 있어야 다음 단계로 이동할 수 있습니다."
+        });
+        return;
+      }
+      const incompleteTeamSetup = activeTeams.filter(([, team]) => (
+        !team.teamSetupComplete || !String(team.teamName || "").trim() || !String(team.teamSlogan || "").trim()
+      ));
+      if (incompleteTeamSetup.length > 0) {
+        await updateRoom({
+          sysMessage: `${incompleteTeamSetup.map(([, team]) => team.teamName || "이름 미정 팀").join(", ")}의 팀 이름과 구호를 확정해야 다음 단계로 이동할 수 있습니다.`
         });
         return;
       }
@@ -1896,14 +1905,24 @@ function AiEvaluationSummary({ team, onOpenOpinion }) {
     return <div className="mt-3 rounded-lg bg-slate-100 px-3 py-3 text-xs font-bold text-slate-500">AI 평가 대기</div>;
   }
   const isFallback = isFallbackEvaluation(evaluation);
+  const gradeCounts = countAiGrades(team);
+  const itemName = team.idea?.serviceName || team.idea?.product || team.idea?.solution || "";
   return (
-    <div className="mt-3 rounded-lg bg-white/80 p-3 ring-1 ring-slate-200">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <p className="min-w-0 truncate text-xs font-black text-slate-600">AI 평가 결과{team.idea?.serviceName && <span className="ml-1 font-bold text-indigo-700">· {team.idea.serviceName}</span>}</p>
-        <div className="print:hidden flex gap-1">
-          <button type="button" onClick={() => setExpanded(!expanded)} className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-black text-indigo-700">{expanded ? "접기" : "펼치기"}</button>
-          <button type="button" onClick={onOpenOpinion} className="rounded-full bg-slate-900 px-3 py-1 text-xs font-black text-white">상세보기</button>
+    <div className="admin-ai-summary mt-3 rounded-lg bg-white/80 p-3 ring-1 ring-slate-200">
+      <div className="admin-ai-summary-heading">
+        <div className="admin-ai-summary-title">
+          <span>AI 평가 결과</span>
+          {itemName && <strong>{itemName}</strong>}
         </div>
+        <div className="admin-ai-summary-actions print:hidden">
+          <button type="button" onClick={() => setExpanded(!expanded)} className="admin-ai-action admin-ai-action-expand">{expanded ? "접기" : "펼치기"}</button>
+          <button type="button" onClick={onOpenOpinion} className="admin-ai-action admin-ai-action-detail">상세보기</button>
+        </div>
+      </div>
+      <div className="admin-ai-grade-counts" aria-label="AI 평가 등급 건수">
+        <span className="admin-ai-count-good">양호 {gradeCounts.양호}건</span>
+        <span className="admin-ai-count-mid">보통 {gradeCounts.보통}건</span>
+        <span className="admin-ai-count-weak">취약 {gradeCounts.취약}건</span>
       </div>
       {expanded && (
         <div className="ai-evaluation-body">

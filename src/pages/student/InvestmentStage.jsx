@@ -91,7 +91,7 @@ export default function InvestmentStage({ room, uid, student }) {
         {availableTeams.map(([key, team]) => {
           const expanded = viewMode === "compare" || expandedTeam === key;
           return <article key={key} className={`rounded-lg bg-white p-4 shadow-lift ${viewMode === "compare" ? "investment-compare-card" : ""}`}>
-            <p className="text-sm font-bold text-indigo-600">{team.teamName}</p><h3 className="mt-1 text-lg font-black">{team.idea?.product || team.idea?.solution || team.techCard?.title || "아이디어 준비 중"}</h3><p className="mt-2 text-sm text-slate-500">{team.idea?.problem || team.trendCard?.title || "팀 발표를 듣고 투자하세요."}</p>
+            <p className="investment-team-name">{team.teamName}</p>
             {viewMode === "list" && <button type="button" onClick={() => setExpandedTeam(expanded ? null : key)} className="touch-button mt-3 w-full rounded-lg bg-indigo-50 px-3 py-2 text-sm font-black text-indigo-700">{expanded ? "사업 내용 및 AI 평가 접기" : "사업 내용 및 AI 평가 보기"}</button>}
             {expanded && <InvestmentTeamDetails team={team} />}
             <div className="investment-range-row"><button type="button" onClick={() => setAmount(key, Number(investments[key] || 0) - INVESTMENT_STEP)} aria-label={`${team.teamName} 투자금 100만원 줄이기`}>−</button><input type="range" min="0" max={INVESTMENT_BUDGET} step={INVESTMENT_STEP} value={investments[key] || 0} onChange={(event) => setAmount(key, event.target.value)} aria-label={`${team.teamName} 투자 금액`} className="w-full accent-indigo-600" /><button type="button" onClick={() => setAmount(key, Number(investments[key] || 0) + INVESTMENT_STEP)} aria-label={`${team.teamName} 투자금 100만원 늘리기`}>+</button></div>
