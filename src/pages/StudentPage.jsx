@@ -17,7 +17,8 @@ import {
   TECH_CARDS,
   TREND_CARDS
 } from "../data/gameData.js";
-import { INVESTMENT_BUDGET, INVESTMENT_STEP, TEAM_BASE_ASSET, formatWon, getAssetChange, getStudentsByTeam, getTeamBaseAsset, getTeamEntries, getTeamStartingCapital, makeStudent, normalizeTeamName, rankTeams, sumInvestments } from "../lib/game.js";
+import { INVESTMENT_BUDGET, INVESTMENT_STEP, TEAM_BASE_ASSET, buildResultInsights, calculateInvestmentPortfolio, formatWon, getAssetChange, getStudentsByTeam, getTeamBaseAsset, getTeamEntries, getTeamStartingCapital, makeStudent, normalizeTeamName, rankInvestors, rankTeams, sumInvestments } from "../lib/game.js";
+import { PIVOT_SCENARIOS } from "../data/simulationSettings.js";
 import { studentDocRef, useRoom } from "../hooks/useRoom.js";
 import { updateOwnStudent, updateOwnTeam } from "../lib/roomStore.js";
 import { getEventImage, getTechCardImage, getTrendCardImage } from "../lib/assets.js";
@@ -170,7 +171,8 @@ export default function StudentPage() {
       {[STATUSES.INVESTMENT, STATUSES.SIMULATION, STATUSES.RESULT].includes(room.status) && <TeamFundingSummary room={room} student={student} />}
       {room.status === STATUSES.INVESTMENT && <Investment room={room} uid={authUid} student={student} />}
       {room.status === STATUSES.SIMULATION && <Simulation room={room} student={student} />}
-      {room.status === STATUSES.RESULT && <Result room={room} />}
+      {room.status === STATUSES.SIMULATION && ["voting", "ready"].includes(room.pivotPhase) && <PivotVote room={room} uid={authUid} student={student} />}
+      {room.status === STATUSES.RESULT && <Result room={room} student={student} />}
     </MobileFrame>
   );
 }
@@ -1068,6 +1070,79 @@ function InvestmentTeamDetails({ team }) {
     </div>
   );
 }
+function PivotVote({ room, uid, student }) {
+  const [visible, setVisible] = useState(false);
+  const team = room.teams?.[student.team];
+  const scenarios = room.simulationSettings?.pivotScenarios || PIVOT_SCENARIOS;
+  const savedVote = team?.midDecision?.votes?.[uid] || "";
+  const [selected, setSelected] = useState(savedVote);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const members = getStudentsByTeam(room.students, student.team);
+  const votes = team?.midDecision?.votes || {};
+  const votedCount = members.filter((member) => votes[member.uid]).length;
+  const resolved = team?.midDecision?.resolvedScenario;
+  const winner = scenarios.find((scenario) => scenario.id === resolved);
+
+  useEffect(() => { if (savedVote) setSelected(savedVote); }, [savedVote]);
+  useEffect(() => { const timer = window.setTimeout(() => setVisible(true), 1000); return () => window.clearTimeout(timer); }, []);
+
+  async function confirmVote() {
+    if (!selected || savedVote || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await updateOwnTeam(room.ownerUid, room.roomId, student.team, { [`midDecision.votes.${uid}`]: selected }, `${student.nickname} 학생이 피벗 투표를 확정했습니다.`);
+    } catch (err) {
+      setError(writeErrorMessage(err, "피벗 투표를 저장하지 못했습니다."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!visible) return null;
+  return (
+    <div className="pivot-vote-overlay" role="dialog" aria-modal="true" aria-labelledby="pivot-vote-title">
+      <section className="pivot-vote-modal">
+        <div className="pivot-vote-top"><span>12개월 피벗 포인트</span><b>{votedCount}/{members.length}명 선택 완료</b></div>
+        <h2 id="pivot-vote-title">우리 회사의 미래를 선택하세요</h2>
+        <p>우리 회사의 미래를 바꿀 아래 10개의 피벗 카드 중 하나를 고르세요. 모든 팀원이 투표하고 가장 높은 투표를 받은 카드가 자동으로 선택됩니다.</p>
+        {resolved && <div className="pivot-resolved-banner"><span>{winner?.icon}</span><div><small>우리 팀 최종 선택</small><strong>{winner?.title || resolved}</strong></div></div>}
+        <div className="pivot-card-scroller" aria-label="피벗 카드 목록">
+          {scenarios.map((scenario) => {
+            const active = selected === scenario.id;
+            return (
+              <button key={scenario.id} type="button" disabled={Boolean(savedVote || resolved)} onClick={() => setSelected(scenario.id)} className={`pivot-card ${active ? "pivot-card-selected" : ""}`}>
+                <span className="pivot-card-icon">{scenario.icon}</span><small>{scenario.tone}</small><h3>{scenario.title}</h3><p>{scenario.summary}</p><dl><div><dt>즉시 효과</dt><dd>{pivotImmediateText(scenario)}</dd></div><div><dt>13~24개월</dt><dd>{pivotEffectText(scenario)}</dd></div></dl>{active && <b className="pivot-card-check"><Check size={16} /> 선택</b>}
+              </button>
+            );
+          })}
+        </div>
+        <div className="pivot-scroll-hint">← 좌우로 밀어 10개 카드를 확인하세요 →</div>
+        <ErrorBanner message={error} onDismiss={() => setError("")} />
+        <button type="button" disabled={!selected || Boolean(savedVote) || busy} onClick={confirmVote} className="pivot-confirm-button">{savedVote ? "선택 확정 완료 · 변경할 수 없음" : busy ? "확정 중..." : "이 카드로 투표 확정"}</button>
+        {savedVote && !resolved && <p className="pivot-waiting-copy">다른 팀원의 선택을 기다리고 있습니다.</p>}
+      </section>
+    </div>
+  );
+}
+
+function pivotImmediateText(scenario) {
+  if (scenario.id === "early_exit") return "현재 자산 동결";
+  if (Number(scenario.immediateRate || 0)) return `현재 자산 ${scenario.immediateRate > 0 ? "+" : ""}${scenario.immediateRate}%`;
+  const amount = Number(scenario.immediateAmount || 0);
+  return amount ? `${amount > 0 ? "+" : "-"}${formatWon(Math.abs(amount))}` : "즉시 비용 없음";
+}
+
+function pivotEffectText(scenario) {
+  const primary = Number(scenario.primaryMultiplier || 1);
+  const secondary = Number(scenario.secondaryMultiplier || 1);
+  const descriptions = {
+    government_support: `F09 이벤트 ${primary}배`, professional_management: `최종 자산 ${Number(scenario.dilutionRate || 0)}% 지분 희석`, downsizing: `모든 이벤트 ${primary}배`, aggressive_expansion: `모든 이벤트 ${primary}배`, turnaround: "최저 등급 팩터 1개 상향", early_exit: "13~24개월 이벤트 미적용", global_expansion: `F01·F04 ${primary}배 / F11 ${secondary}배`, ip_protection: `F14 양호 / E05·E19 하락 ${primary}배`, cofounder_reset: `E16·E20 하락 ${primary}배 / 양호 상승 ${secondary}배`, crowdfunding: `F02·F07·F11 ${primary}배`
+  };
+  return descriptions[scenario.id] || scenario.effectLabel;
+}
+
 function Simulation({ room, student }) {
   const myTeam = room.teams?.[student.team];
   const displayAsset = getDisplayAsset(myTeam, room.currentMonth || 0);
@@ -1200,7 +1275,7 @@ function StudentEventShowcase({ event, impact, month, team }) {
       <div className={`student-event-asset-overlay ${activeImpact ? "student-event-asset-applied" : "student-event-asset-waiting"} ${changedAmount < 0 ? "student-event-asset-negative" : "student-event-asset-positive"}`}>
         <div>
           <p>{activeImpact ? "우리 팀 실시간 자산" : "현재 자산 현황"}</p>
-          <strong>{formatWon(afterAsset)}</strong>
+          <RollingWon from={beforeAsset} to={afterAsset} active={Boolean(activeImpact)} />
           {activeImpact && <span>{changedAmount >= 0 ? "+" : ""}{formatWon(changedAmount)} · {changePct >= 0 ? "+" : ""}{changePct}%</span>}
         </div>
         <svg viewBox="0 0 100 56" role="img" aria-label="우리 팀 자산 변화 그래프">
@@ -1209,13 +1284,42 @@ function StudentEventShowcase({ event, impact, month, team }) {
       </div>
     </div>
   );
-}function Result({ room }) {
+}
+
+function RollingWon({ from, to, active }) {
+  const [value, setValue] = useState(active ? from : to);
+  useEffect(() => {
+    if (!active) { setValue(to); return undefined; }
+    let frame = 0;
+    const startedAt = performance.now();
+    const duration = 850;
+    const tick = (now) => {
+      const progress = Math.min(1, (now - startedAt) / duration);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      setValue(Math.round(from + (to - from) * eased));
+      if (progress < 1) frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [active, from, to]);
+  return <strong className={active ? "asset-number-rolling" : ""}>{formatWon(value)}</strong>;
+}
+
+function Result({ room, student }) {
   const [selected, setSelected] = useState(null);
+  const [tab, setTab] = useState("company");
   const rankedTeams = useMemo(() => rankTeams(room.teams), [room.teams]);
+  const rankedInvestors = useMemo(() => rankInvestors(room.students, room.teams), [room.students, room.teams]);
+  const insights = useMemo(() => buildResultInsights(room.teams), [room.teams]);
   const winner = rankedTeams[0];
+  if (tab === "investor") {
+    return <section><ResultTabs tab={tab} setTab={setTab} /><StudentInvestorView room={room} student={student} investors={rankedInvestors} /></section>;
+  }
   return (
     <section>
+      <ResultTabs tab={tab} setTab={setTab} />
       <h2 className="text-2xl font-black">최종 순위 및 사업 리포트</h2>
+      <div className="student-result-insights">{insights.map((insight) => <article key={insight.label}><span>{insight.icon}</span><div><small>{insight.label}</small><strong>{insight.value} · 최종 {insight.rank}위</strong></div></article>)}</div>
       {winner && (
         <button onClick={() => setSelected(winner)} className="mt-4 w-full overflow-hidden rounded-lg bg-gradient-to-br from-amber-300 via-orange-500 to-rose-600 p-1 text-left shadow-[0_16px_40px_rgba(245,158,11,0.35)]">
           <div className="rounded-lg bg-white/95 p-5">
@@ -1264,6 +1368,25 @@ function StudentEventShowcase({ event, impact, month, team }) {
       </div>
       {selected && <ReportModal team={selected} members={getStudentsByTeam(room.students, selected.key)} onClose={() => setSelected(null)} />}
     </section>
+  );
+}
+
+function ResultTabs({ tab, setTab }) {
+  return <div className="result-tabs" role="tablist" aria-label="최종 순위 구분"><button type="button" role="tab" aria-selected={tab === "company"} onClick={() => setTab("company")}>기업 순위</button><button type="button" role="tab" aria-selected={tab === "investor"} onClick={() => setTab("investor")}>나는 투자왕</button></div>;
+}
+
+function StudentInvestorView({ room, student, investors }) {
+  const myIndex = investors.findIndex((investor) => investor.uid === student.uid);
+  const portfolio = myIndex >= 0 ? investors[myIndex].portfolio : calculateInvestmentPortfolio(student, room.teams);
+  return (
+    <div className="student-investor-view">
+      <section className="student-investor-hero">
+        <p>5천만원으로 만든 나의 투자 결과</p><strong>{formatWon(portfolio.finalValue)}</strong><span className={portfolio.profit >= 0 ? "profit-up" : "profit-down"}>{portfolio.profit >= 0 ? "+" : ""}{formatWon(portfolio.profit)} · {portfolio.rate >= 0 ? "+" : ""}{portfolio.rate.toFixed(1)}%</span>
+        <div><b>내 순위 {myIndex >= 0 ? `${myIndex + 1}위` : "-"}</b><span>현금 잔액 {formatWon(portfolio.cash)}</span></div>
+      </section>
+      <section className="student-holdings"><h3>내 투자금 현황</h3>{portfolio.holdings.length ? portfolio.holdings.map((holding) => <div key={holding.teamKey}><span><b>{room.teams[holding.teamKey]?.teamName || holding.teamKey}</b><small>투자 {formatWon(holding.amount)}</small></span><strong>{formatWon(holding.value)}<small>{(holding.ratio * 100).toFixed(1)}%</small></strong></div>) : <p>투자하지 않은 금액은 현금으로 유지되었습니다.</p>}</section>
+      <section className="investor-ranking investor-ranking-compact"><div className="investor-ranking-heading"><div><p>나는 투자왕</p><h3>TOP 3</h3></div><Crown size={28} /></div><div className="investor-ranking-list">{investors.slice(0, 3).map((investor, index) => <div key={investor.uid} className={`investor-top-${index + 1} ${investor.uid === student.uid ? "investor-me" : ""}`}><b>{index + 1}</b><span><strong>{investor.nickname}</strong><small>수익률 {investor.portfolio.rate >= 0 ? "+" : ""}{investor.portfolio.rate.toFixed(1)}%</small></span><em>{formatWon(investor.portfolio.finalValue)}</em></div>)}</div></section>
+    </div>
   );
 }
 function AssetBars({ teams, currentMonth = 0 }) {

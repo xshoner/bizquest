@@ -1,10 +1,12 @@
 ﻿import { useEffect, useState } from "react";
 import { auth, db, doc, getDoc } from "../firebase.js";
+import { DEFAULT_SIMULATION_SETTINGS, mergeSimulationSettings } from "../data/simulationSettings.js";
 
 export const DEFAULT_APP_SETTINGS = {
   adminPasscode: "7476",
   defaultRoomTitle: "스타트업 히어로",
   studentOriginHost: "192.168.0.190",
+  simulation: DEFAULT_SIMULATION_SETTINGS,
   landing: {
     heroAlt: "BIZ 퀘스트 청소년 창업 체험 게이미피케이션",
     startLink: "지금 시작하기",
@@ -114,6 +116,7 @@ export function mergeAppSettings(settings = {}) {
   return {
     ...DEFAULT_APP_SETTINGS,
     ...sanitizedSettings,
+    simulation: mergeSimulationSettings(settings.simulation),
     landing: {
       ...DEFAULT_APP_SETTINGS.landing,
       ...incomingLanding,

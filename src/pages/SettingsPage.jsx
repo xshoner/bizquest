@@ -5,6 +5,7 @@ import { collection, db, deleteDoc, doc, getDocs, setDoc } from "../firebase.js"
 import { createManagedTeacher, readLocalTeacherRegistry, useTeacherAuth } from "../hooks/useTeacherAuth.js";
 import { deleteRoomDeep } from "../lib/roomStore.js";
 import { APP_SETTINGS_PATH, DEFAULT_APP_SETTINGS, LOCAL_APP_SETTINGS_KEY, mergeAppSettings, useAppSettings } from "../lib/appSettings.js";
+import { BUSINESS_FACTORS, SIMULATION_EVENTS } from "../data/gameData.js";
 
 function uniqueUsers(items) {
   const map = new Map();
@@ -70,6 +71,39 @@ export default function SettingsPage() {
 
   function updateManagedField(key, value) {
     setManagedForm((current) => ({ ...current, [key]: value }));
+  }
+
+  function updatePivotScenario(index, key, value) {
+    setForm((current) => {
+      const pivotScenarios = current.simulation.pivotScenarios.map((scenario, scenarioIndex) => scenarioIndex === index ? { ...scenario, [key]: Number(value) } : scenario);
+      return { ...current, simulation: { ...current.simulation, pivotScenarios } };
+    });
+  }
+
+  function updateEventMultiplier(eventId, direction, value) {
+    setForm((current) => ({
+      ...current,
+      simulation: {
+        ...current.simulation,
+        eventMultipliers: {
+          ...current.simulation.eventMultipliers,
+          [eventId]: { ...current.simulation.eventMultipliers[eventId], [direction]: Number(value) }
+        }
+      }
+    }));
+  }
+
+  function updateFactorMultiplier(factorId, grade, value) {
+    setForm((current) => ({
+      ...current,
+      simulation: {
+        ...current.simulation,
+        factorGradeMultipliers: {
+          ...current.simulation.factorGradeMultipliers,
+          [factorId]: { ...current.simulation.factorGradeMultipliers[factorId], [grade]: Number(value) }
+        }
+      }
+    }));
   }
 
   async function saveSettings() {
@@ -311,6 +345,52 @@ export default function SettingsPage() {
             <Trash2 size={16} />
             기존 게임방 데이터 삭제
           </button>
+        </section>
+
+        <section className="settings-panel settings-panel-wide">
+          <h2><Settings size={20} /> 피벗 카드 밸런스</h2>
+          <p className="settings-help">금액은 원, 비율은 %, 배율은 1.0이 기본입니다. 카드의 성격은 유지하면서 수업 난이도에 맞게 조정할 수 있습니다.</p>
+          <div className="settings-balance-list">
+            {form.simulation.pivotScenarios.map((scenario, index) => (
+              <article key={scenario.id} className="settings-balance-card">
+                <div><strong>{scenario.icon} {scenario.title}</strong><span>{scenario.effectLabel}</span></div>
+                <label>즉시 금액<input type="number" step="1000000" value={scenario.immediateAmount || 0} onChange={(event) => updatePivotScenario(index, "immediateAmount", event.target.value)} /></label>
+                {scenario.immediateRate !== undefined && <label>즉시 비율(%)<input type="number" step="1" value={scenario.immediateRate || 0} onChange={(event) => updatePivotScenario(index, "immediateRate", event.target.value)} /></label>}
+                {scenario.primaryMultiplier !== undefined && <label>주요 배율<input type="number" min="0" step="0.1" value={scenario.primaryMultiplier || 0} onChange={(event) => updatePivotScenario(index, "primaryMultiplier", event.target.value)} /></label>}
+                {scenario.secondaryMultiplier !== undefined && <label>보조 배율<input type="number" min="0" step="0.1" value={scenario.secondaryMultiplier || 0} onChange={(event) => updatePivotScenario(index, "secondaryMultiplier", event.target.value)} /></label>}
+                {scenario.dilutionRate !== undefined && <label>희석률(%)<input type="number" min="0" max="100" step="1" value={scenario.dilutionRate || 0} onChange={(event) => updatePivotScenario(index, "dilutionRate", event.target.value)} /></label>}
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="settings-panel settings-panel-wide">
+          <h2><Settings size={20} /> 이벤트 카드 ± 배율</h2>
+          <p className="settings-help">각 경영 이벤트의 상승과 하락 강도를 별도로 조정합니다.</p>
+          <div className="settings-rate-table">
+            <div className="settings-rate-head"><b>카드</b><b>+ 배율</b><b>- 배율</b></div>
+            {SIMULATION_EVENTS.map((event) => (
+              <div key={event.id} className="settings-rate-row">
+                <span><b>{event.id}</b> {event.title}</span>
+                <input aria-label={`${event.id} 상승 배율`} type="number" min="0" step="0.1" value={form.simulation.eventMultipliers[event.id]?.positive ?? 1} onChange={(e) => updateEventMultiplier(event.id, "positive", e.target.value)} />
+                <input aria-label={`${event.id} 하락 배율`} type="number" min="0" step="0.1" value={form.simulation.eventMultipliers[event.id]?.negative ?? 1} onChange={(e) => updateEventMultiplier(event.id, "negative", e.target.value)} />
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="settings-panel settings-panel-wide">
+          <h2><Settings size={20} /> 팩터별 등급 배율</h2>
+          <p className="settings-help">팩터마다 양호·보통·취약 결과의 반영 강도를 조정합니다.</p>
+          <div className="settings-rate-table settings-factor-table">
+            <div className="settings-rate-head"><b>팩터</b><b>양호</b><b>보통</b><b>취약</b></div>
+            {BUSINESS_FACTORS.map((factor) => (
+              <div key={factor.id} className="settings-rate-row">
+                <span><b>{factor.id}</b> {factor.name}</span>
+                {["양호", "보통", "취약"].map((grade) => <input key={grade} aria-label={`${factor.id} ${grade} 배율`} type="number" min="0" step="0.1" value={form.simulation.factorGradeMultipliers[factor.id]?.[grade] ?? 1} onChange={(e) => updateFactorMultiplier(factor.id, grade, e.target.value)} />)}
+              </div>
+            ))}
+          </div>
         </section>
       </div>
 

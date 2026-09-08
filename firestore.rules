@@ -136,7 +136,7 @@ service cloud.firestore {
 
     // Fields a team leader may change on their own team.
     function leaderTeamKeys() {
-      return ['teamName', 'mascot', 'teamSlogan', 'teamSetupComplete', 'trendCard', 'techCard', 'idea', 'ideaSubmitted', 'aiEvaluation', 'midDecision'];
+      return ['teamName', 'mascot', 'teamSlogan', 'teamSetupComplete', 'trendCard', 'techCard', 'idea', 'ideaSubmitted', 'aiEvaluation'];
     }
 
     // Fields that are only meaningful during the planning phases.
@@ -178,7 +178,16 @@ service cloud.firestore {
                     && (!('teamSetupComplete' in teamAfter) || teamAfter.teamSetupComplete is bool))))
           ||
           // Any team member: mid-simulation decision votes only.
-          changedTeamKeys.hasOnly(['midDecision'])
+          (changedTeamKeys.hasOnly(['midDecision'])
+            && before.status == 'SIMULATION'
+            && before.currentMonth == 12
+            && teamBefore.midDecision is map
+            && teamAfter.midDecision is map
+            && teamBefore.midDecision.get('resolvedScenario', null) == null
+            && teamAfter.midDecision.diff(teamBefore.midDecision).affectedKeys().hasOnly(['votes'])
+            && teamBefore.midDecision.get('votes', {}).diff(teamAfter.midDecision.get('votes', {})).affectedKeys().hasOnly([request.auth.uid])
+            && !(request.auth.uid in teamBefore.midDecision.get('votes', {}))
+            && teamAfter.midDecision.votes[request.auth.uid] is string)
         );
     }
   }

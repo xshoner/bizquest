@@ -1,4 +1,5 @@
 import { SIMULATION_EVENTS, TEAM_KEYS } from "../data/gameData.js";
+import { PIVOT_SCENARIOS, mergeSimulationSettings } from "../data/simulationSettings.js";
 
 export const TEAM_BASE_ASSET = 100000000;
 /** Length of the management simulation in months. */
@@ -101,6 +102,7 @@ export function makeInitialRoom(roomId, roomTitle = "스타트업 히어로") {
     resultFinalizing: false,
     resultFinalizeAt: 0,
     currentDecision: null,
+    pivotPhase: null,
     phaseTimer: null,
     sysMessage: "방이 열렸습니다. QR 또는 방 코드로 입장하세요.",
     teams: makeDefaultTeams()
@@ -126,6 +128,56 @@ export function rankTeams(teams = {}) {
   return getTeamEntries(teams)
     .map(([key, team]) => ({ key, ...team }))
     .sort((a, b) => (b.currentAsset || 0) - (a.currentAsset || 0));
+}
+
+export function calculateInvestmentPortfolio(student, teams = {}, budget = INVESTMENT_BUDGET) {
+  const valid = isValidInvestmentRecord(student, teams, budget);
+  const investments = valid ? student.investments || {} : {};
+  const invested = sumInvestments(investments);
+  const cash = Math.max(0, budget - invested);
+  const holdings = Object.entries(investments).map(([teamKey, amount]) => {
+    const team = teams[teamKey];
+    const start = getTeamStartingCapital(team);
+    const ratio = start > 0 ? Math.max(0, Number(team?.currentAsset || 0) / start) : 0;
+    return { teamKey, amount: Number(amount || 0), value: Math.round(Number(amount || 0) * ratio), ratio };
+  });
+  const finalValue = cash + holdings.reduce((sum, holding) => sum + holding.value, 0);
+  return { initialValue: budget, invested, cash, holdings, finalValue, profit: finalValue - budget, rate: budget ? ((finalValue - budget) / budget) * 100 : 0 };
+}
+
+export function rankInvestors(students = {}, teams = {}) {
+  return Object.entries(students)
+    .map(([uid, student]) => ({ uid, ...student, portfolio: calculateInvestmentPortfolio(student, teams) }))
+    .sort((a, b) => b.portfolio.finalValue - a.portfolio.finalValue || String(a.nickname || "").localeCompare(String(b.nickname || ""), "ko"));
+}
+
+export function buildResultInsights(teams = {}) {
+  const ranked = rankTeams(teams);
+  if (!ranked.length) return [];
+  const rankOf = (team) => ranked.findIndex((item) => item.key === team?.key) + 1;
+  const bestBy = (score, direction = "max", candidates = ranked) => [...candidates].sort((a, b) => {
+    const delta = Number(score(b)) - Number(score(a));
+    return direction === "max" ? delta || rankOf(a) - rankOf(b) : -delta || rankOf(a) - rankOf(b);
+  })[0];
+  const monthlyWins = Object.fromEntries(ranked.map((team) => [team.key, 0]));
+  for (let month = 1; month <= 12; month += 1) {
+    const leader = bestBy((team) => {
+      const points = Array.isArray(team.assetHistory) ? team.assetHistory.filter((point) => Number(point.month) <= month) : [];
+      return Number(points[points.length - 1]?.asset ?? getTeamStartingCapital(team));
+    });
+    if (leader) monthlyWins[leader.key] += 1;
+  }
+  const diversityTeams = ranked.filter((team) => team.diversity);
+  const leaders = [
+    { icon: "👑", label: "12개월 동안 가장 오래 1위를 달린 팀", team: bestBy((team) => monthlyWins[team.key]) },
+    { icon: "✅", label: "전 항목에서 가장 많은 ‘양호’를 받은 팀", team: bestBy((team) => countAiGrades(team).양호) },
+    { icon: "⚠️", label: "전 항목에서 가장 많은 ‘취약’을 받은 팀", team: bestBy((team) => countAiGrades(team).취약) },
+    { icon: "🌈", label: "팀원 다양성이 가장 우수한 팀", team: diversityTeams.length ? bestBy((team) => team.diversity?.rate || 0, "max", diversityTeams) : ranked[0] },
+    { icon: "🧬", label: "팀원 성향이 가장 닮았던 팀", team: diversityTeams.length ? bestBy((team) => team.diversity?.rate || 0, "min", diversityTeams) : ranked[0] },
+    { icon: "💰", label: "가장 많은 투자를 유치한 팀", team: bestBy((team) => team.investmentsReceived || 0) },
+    { icon: "🪙", label: "가장 적은 투자를 유치한 팀", team: bestBy((team) => team.investmentsReceived || 0, "min") }
+  ];
+  return leaders.map((item) => ({ ...item, rank: rankOf(item.team), value: item.team?.teamName || "-" }));
 }
 
 export function drawEvent() {
@@ -259,9 +311,69 @@ export function makeNextTeamKey(teams = {}) {
   return key;
 }
 
-export function applyRiskMultiplier(team, event) {
-  const grade = team.aiEvaluation?.factors?.[event.factor]?.grade || "보통";
-  const rate = Number(event.rates?.[grade] ?? 0);
+export function getPivotScenario(settings, scenarioId) {
+  return mergeSimulationSettings(settings).pivotScenarios.find((scenario) => scenario.id === scenarioId)
+    || PIVOT_SCENARIOS.find((scenario) => scenario.id === scenarioId);
+}
+
+export function resolvePivotVote(team, memberUids = [], scenarios = PIVOT_SCENARIOS) {
+  const votes = team?.midDecision?.votes || {};
+  const counts = {};
+  for (const uid of memberUids) {
+    const scenarioId = votes[uid];
+    if (scenarios.some((scenario) => scenario.id === scenarioId)) counts[scenarioId] = (counts[scenarioId] || 0) + 1;
+  }
+  const max = Math.max(0, ...Object.values(counts));
+  const tied = scenarios.filter((scenario) => counts[scenario.id] === max);
+  const leaderVote = votes[team?.leaderId];
+  return tied.find((scenario) => scenario.id === leaderVote)?.id || tied[0]?.id || scenarios[0]?.id || null;
+}
+
+export function makePivotTeamPatch(team, scenario, month = 12) {
+  const beforeAsset = Number(team.currentAsset || 0);
+  const immediateAmount = Number(scenario?.immediateAmount || 0);
+  const immediateRate = Number(scenario?.immediateRate || 0);
+  const afterAsset = Math.round(beforeAsset * (1 + immediateRate / 100) + immediateAmount);
+  const modifiers = { scenarioId: scenario?.id, appliedAtMonth: month };
+  if (scenario?.id === "government_support") modifiers.factorMultipliers = { F09: Number(scenario.primaryMultiplier || 1) };
+  if (scenario?.id === "professional_management") modifiers.equityDilutionRate = Number(scenario.dilutionRate || 0);
+  if (scenario?.id === "downsizing" || scenario?.id === "aggressive_expansion") modifiers.eventRateMultiplier = Number(scenario.primaryMultiplier || 1);
+  if (scenario?.id === "early_exit") modifiers.frozenAfterMonth = month;
+  if (scenario?.id === "global_expansion") modifiers.factorMultipliers = { F01: Number(scenario.primaryMultiplier || 1), F04: Number(scenario.primaryMultiplier || 1), F11: Number(scenario.secondaryMultiplier || 1) };
+  if (scenario?.id === "ip_protection") {
+    modifiers.factorOverrides = { F14: "양호" };
+    modifiers.negativeEventMultipliers = { E05: Number(scenario.primaryMultiplier || 1), E19: Number(scenario.primaryMultiplier || 1) };
+  }
+  if (scenario?.id === "cofounder_reset") {
+    modifiers.negativeEventMultipliers = { E16: Number(scenario.primaryMultiplier || 1), E20: Number(scenario.primaryMultiplier || 1) };
+    modifiers.goodPositiveMultiplier = Number(scenario.secondaryMultiplier || 1);
+  }
+  if (scenario?.id === "crowdfunding") modifiers.factorMultipliers = { F02: Number(scenario.primaryMultiplier || 1), F07: Number(scenario.primaryMultiplier || 1), F11: Number(scenario.primaryMultiplier || 1) };
+  if (scenario?.id === "turnaround") {
+    const factors = team.aiEvaluation?.factors || {};
+    const target = Object.keys(factors).find((key) => factors[key]?.grade === "취약") || Object.keys(factors).find((key) => factors[key]?.grade === "보통");
+    if (target) modifiers.factorOverrides = { [target]: factors[target]?.grade === "취약" ? "보통" : "양호" };
+  }
+  const history = Array.isArray(team.assetHistory) ? team.assetHistory : [];
+  return { currentAsset: afterAsset, pivotModifiers: modifiers, pivotScenarioId: scenario?.id, assetHistory: [...history, { month, asset: afterAsset, pivot: true }] };
+}
+
+export function applyRiskMultiplier(team, event, simulationSettings = {}, month = 0) {
+  const settings = mergeSimulationSettings(simulationSettings);
+  const modifiers = team.pivotModifiers || {};
+  const baseGrade = team.aiEvaluation?.factors?.[event.factor]?.grade || "보통";
+  const grade = modifiers.factorOverrides?.[event.factor] || baseGrade;
+  let rate = Number(event.rates?.[grade] ?? 0);
+  rate *= Number(settings.eventMultipliers?.[event.id]?.[rate >= 0 ? "positive" : "negative"] || 1);
+  rate *= Number(settings.factorGradeMultipliers?.[event.factor]?.[grade] || 1);
+  if (month > 12) {
+    rate *= Number(modifiers.eventRateMultiplier || 1);
+    rate *= Number(modifiers.factorMultipliers?.[event.factor] || 1);
+    if (rate < 0) rate *= Number(modifiers.negativeEventMultipliers?.[event.id] || 1);
+    if (rate > 0 && grade === "양호") rate *= Number(modifiers.goodPositiveMultiplier || 1);
+    if (Number(modifiers.frozenAfterMonth || 0) > 0) rate = 0;
+  }
+  rate = Math.round(rate * 100) / 100;
   const beforeAsset = Number(team.currentAsset || 0);
   const afterAsset = Math.round(beforeAsset * (1 + rate / 100));
 

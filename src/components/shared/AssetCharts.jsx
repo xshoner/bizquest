@@ -45,6 +45,8 @@ export function AssetTrendChart({ team, className = "", size = "wide" }) {
   });
   const last = history[history.length - 1];
   const gradientId = `asset-line-${size}-${team.teamId || team.key}`;
+  const pivotIndex = history.findIndex((point) => point.month === 12);
+  const pivotX = pivotIndex >= 0 ? points[pivotIndex]?.[0] : null;
 
   return (
     <div className={`rounded-lg bg-white p-3 ring-1 ring-slate-200 ${className}`}>
@@ -63,6 +65,7 @@ export function AssetTrendChart({ team, className = "", size = "wide" }) {
         {[0, 1, 2].map((line) => (
           <line key={line} x1={padding} x2={width - padding} y1={padding + line * gridStep} y2={padding + line * gridStep} stroke="#e2e8f0" strokeWidth="1" />
         ))}
+        {pivotX !== null && <><line x1={pivotX} x2={pivotX} y1={padding - 4} y2={height - padding + 4} stroke="#f59e0b" strokeWidth="2" strokeDasharray="5 5" /><text x={pivotX} y={padding - 6} textAnchor="middle" fill="#b45309" fontSize="11" fontWeight="900">PIVOT</text></>}
         <polyline points={points.map(([x, y]) => `${x},${y}`).join(" ")} fill="none" stroke={`url(#${gradientId})`} strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" />
         {history.map((point, index) => {
           if (index !== 0 && index !== history.length - 1 && point.month % 6 !== 0) return null;

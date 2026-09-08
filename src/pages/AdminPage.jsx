@@ -48,6 +48,11 @@ import {
   SIMULATION_MONTHS,
   TEAM_BASE_ASSET,
   applyRiskMultiplier,
+  buildResultInsights,
+  getPivotScenario,
+  makePivotTeamPatch,
+  rankInvestors,
+  resolvePivotVote,
   drawEvent,
   formatWon,
   getAvatarColor,
@@ -64,6 +69,7 @@ import {
   normalizeTeamName,
   rankTeams
 } from "../lib/game.js";
+import { PIVOT_SCENARIOS } from "../data/simulationSettings.js";
 import { isFallbackEvaluation, makeFallbackAiEvaluation } from "../lib/aiEvaluation.js";
 import { deleteRoomDeep, deleteTeamDeep, moveStudent, removeStudentDeep, resetRoomDeep } from "../lib/roomStore.js";
 import { useAppSettings } from "../lib/appSettings.js";
@@ -103,7 +109,7 @@ const PHASE_ICONS = {
 /** Interval between simulated months. */
 const SIMULATION_EVENT_DELAY = 5000;
 /** Delay between announcing an event and applying its asset impact. */
-const SIMULATION_EVENT_APPLY_DELAY = 1500;
+const SIMULATION_EVENT_APPLY_DELAY = 4000;
 /** Time before the result board is revealed after the teacher presses "최종 결과". */
 const RESULT_FINALIZE_DELAY = 3000;
 const SIMULATION_LEASE_TIMEOUT = 12000;
@@ -570,6 +576,7 @@ export default function AdminPage() {
   const [recentRooms, setRecentRooms] = useState([]);
   const [recentRoomsLoading, setRecentRoomsLoading] = useState(false);
   const [deletingRoomId, setDeletingRoomId] = useState("");
+  const [pivotUiVisible, setPivotUiVisible] = useState(false);
   const simulationTimerRef = useRef(null); // next-month timer
   const applyTimerRef = useRef(null); // pending "apply event impact" timer
   const simulationActiveRef = useRef(false); // true while this tab drives the simulation
@@ -578,8 +585,15 @@ export default function AdminPage() {
   const adminSessionIdRef = useRef(makeAdminSessionId());
   const bgmRef = useRef(null);
   const resultBoardRef = useRef(null);
+  const pivotResolvingRef = useRef(false);
 
   useEffect(() => installAudioUnlock(), []);
+
+  useEffect(() => {
+    if (!["voting", "ready"].includes(room?.pivotPhase)) { setPivotUiVisible(false); return undefined; }
+    const timer = window.setTimeout(() => setPivotUiVisible(true), 1000);
+    return () => window.clearTimeout(timer);
+  }, [room?.pivotPhase]);
 
   useEffect(() => () => {
     clearSimulationTimers();
@@ -662,6 +676,7 @@ export default function AdminPage() {
   const students = room?.students || {};
   const teams = room?.teams || {};
   const rankedTeams = useMemo(() => rankTeams(teams), [teams]);
+  const rankedInvestors = useMemo(() => rankInvestors(students, teams), [students, teams]);
   const activeTeamEntries = useMemo(() => getTeamEntries(teams).filter(([teamKey]) =>
     Object.values(students).some((student) => student.team === teamKey)
   ), [teams, students]);
@@ -669,6 +684,8 @@ export default function AdminPage() {
   const allPlansLocked = allPlansSubmitted && activeTeamEntries.every(([, team]) => team.ideaLocked);
   const allTeamsEvaluated = activeTeamEntries.length > 0 && activeTeamEntries.every(([, team]) => team.aiEvaluation);
   const investmentChartVisible = [STATUSES.INVESTMENT, STATUSES.SIMULATION, STATUSES.RESULT].includes(room?.status);
+  const activeTeamKeys = activeTeamEntries.map(([key]) => key);
+  const allPivotsResolved = activeTeamEntries.length > 0 && activeTeamEntries.every(([, team]) => Boolean(team.midDecision?.resolvedScenario));
   const currentRoomRef = () => roomDocRef(authState.user.uid, roomId);
 
   async function updateRoom(patch) {
@@ -759,9 +776,33 @@ export default function AdminPage() {
   }, [room?.resultFinalizeAt, room?.resultFinalizing, roomId]);
 
   useEffect(() => {
-    if (!roomId || simulationRunning || Number(room?.currentMonth || 0) < SIMULATION_MONTHS || !room?.currentEvent || room.currentEventApplied !== false) return;
-    applySimulationEvent(room.currentEvent, Number(room.currentMonth || 0)).catch(() => {});
+    const pendingMonth = Number(room?.currentMonth || 0);
+    if (!roomId || simulationRunning || ![12, SIMULATION_MONTHS].includes(pendingMonth) || !room?.currentEvent || room.currentEventApplied !== false) return;
+    if (applyTimerRef.current) return;
+    applyTimerRef.current = window.setTimeout(() => {
+      applyTimerRef.current = null;
+      applySimulationEvent(room.currentEvent, pendingMonth).catch(() => {});
+    }, SIMULATION_EVENT_APPLY_DELAY);
   }, [room?.currentEvent?.id, room?.currentEventApplied, room?.currentMonth, roomId, simulationRunning]);
+
+  useEffect(() => {
+    if (room?.pivotPhase !== "voting" || pivotResolvingRef.current) return;
+    const readyTeams = activeTeamEntries.filter(([key, team]) => {
+      if (team.midDecision?.resolvedScenario) return false;
+      const members = getStudentsByTeam(students, key);
+      return members.length > 0 && members.every((member) => team.midDecision?.votes?.[member.uid]);
+    });
+    if (!readyTeams.length) return;
+    pivotResolvingRef.current = true;
+    Promise.all(readyTeams.map(([key]) => resolveTeamPivot(key)))
+      .finally(() => { pivotResolvingRef.current = false; });
+  }, [room?.pivotPhase, teams, students]);
+
+  useEffect(() => {
+    if (room?.pivotPhase === "voting" && allPivotsResolved) {
+      updateRoom({ pivotPhase: "ready", sysMessage: "모든 팀의 피벗 카드가 확정되었습니다. 계속 진행을 눌러 13개월 차를 시작하세요." }).catch(() => {});
+    }
+  }, [allPivotsResolved, room?.pivotPhase]);
 
   async function createRoom() {
     setActionError("");
@@ -909,8 +950,20 @@ export default function AdminPage() {
       return;
     }
     stopSimulationBgm();
+    const dilutionPatch = {};
+    for (const [key, team] of Object.entries(room.teams || {})) {
+      const dilutionRate = Number(team.pivotModifiers?.equityDilutionRate || 0);
+      if (!dilutionRate || team.equityDilutionApplied) continue;
+      const finalAsset = Math.round(Number(team.currentAsset || 0) * (1 - dilutionRate / 100));
+      const history = Array.isArray(team.assetHistory) ? [...team.assetHistory] : [];
+      if (history.length) history[history.length - 1] = { ...history[history.length - 1], asset: finalAsset, dilution: true };
+      dilutionPatch[`teams.${key}.currentAsset`] = finalAsset;
+      dilutionPatch[`teams.${key}.assetHistory`] = history;
+      dilutionPatch[`teams.${key}.equityDilutionApplied`] = true;
+    }
     const resultFinalizeAt = Date.now() + RESULT_FINALIZE_DELAY;
     await updateRoom({
+      ...dilutionPatch,
       resultFinalizing: true,
       resultFinalizeAt,
       phaseTimer: null,
@@ -1135,6 +1188,8 @@ export default function AdminPage() {
       currentEventApplied: true,
       eventHistory: [],
       currentDecision: null,
+      pivotPhase: null,
+      simulationSettings: appSettings.simulation,
       aiEvaluationStatus: "done",
       resultFinalizing: false,
       resultFinalizeAt: 0,
@@ -1154,7 +1209,7 @@ export default function AdminPage() {
     if (Number(applyRoom.currentMonth || 0) !== month || applyRoom.currentEvent?.id !== event.id || applyRoom.currentEventApplied) return;
     const teamPatch = {};
     for (const [key, team] of Object.entries(applyRoom.teams || {})) {
-      const updated = applyRiskMultiplier(team, event);
+      const updated = applyRiskMultiplier(team, event, applyRoom.simulationSettings || appSettings.simulation, month);
       const history = Array.isArray(team.assetHistory) && team.assetHistory.length > 0
         ? team.assetHistory
         : [{ month: 0, asset: getTeamStartingCapital(team) }];
@@ -1162,15 +1217,60 @@ export default function AdminPage() {
       teamPatch[`teams.${key}.lastEventImpact`] = updated.lastEventImpact;
       teamPatch[`teams.${key}.assetHistory`] = [...history, { month, asset: updated.currentAsset }];
     }
-    const keepRunning = Boolean(applyRoom.simulationRunning) && month < SIMULATION_MONTHS;
+    const isPivotStop = month === 12 && applyRoom.pivotPhase !== "applied";
+    if (isPivotStop) {
+      for (const key of Object.keys(applyRoom.teams || {})) {
+        teamPatch[`teams.${key}.midDecision`] = { votes: {}, resolvedScenario: null };
+      }
+    }
+    const keepRunning = Boolean(applyRoom.simulationRunning) && month < SIMULATION_MONTHS && !isPivotStop;
     await updateRoom({
       ...teamPatch,
       currentEventApplied: true,
+      ...(isPivotStop ? { pivotPhase: "voting" } : {}),
       simulationRunning: keepRunning,
       simulationOwner: keepRunning ? applyRoom.simulationOwner || adminSessionIdRef.current : null,
       simulationHeartbeatAt: keepRunning ? Date.now() : 0,
-      sysMessage: month >= SIMULATION_MONTHS ? `${SIMULATION_MONTHS}개월 경영 시뮬레이션이 종료되었습니다. 교사가 최종 결과 버튼을 누르면 결과가 공개됩니다.` : `${month}개월 차 이벤트 자산 변동이 반영되었습니다.`
+      sysMessage: month >= SIMULATION_MONTHS ? `${SIMULATION_MONTHS}개월 경영 시뮬레이션이 종료되었습니다. 교사가 최종 결과 버튼을 누르면 결과가 공개됩니다.` : isPivotStop ? "12개월 차가 종료되었습니다. 모든 팀원이 미래를 바꿀 피벗 카드에 투표하세요." : `${month}개월 차 이벤트 자산 변동이 반영되었습니다.`
     });
+  }
+
+  async function resolveTeamPivot(teamKey, force = false) {
+    const team = teams[teamKey];
+    if (!team || team.midDecision?.resolvedScenario) return;
+    const members = getStudentsByTeam(students, teamKey);
+    const votes = team.midDecision?.votes || {};
+    if (!force && !members.every((member) => votes[member.uid])) return;
+    const settings = room.simulationSettings || appSettings.simulation;
+    const scenarioId = resolvePivotVote(team, members.map((member) => member.uid), settings.pivotScenarios || PIVOT_SCENARIOS);
+    await updateRoom({
+      [`teams.${teamKey}.midDecision.resolvedScenario`]: scenarioId,
+      [`teams.${teamKey}.midDecision.resolvedAt`]: Date.now(),
+      sysMessage: `${team.teamName}의 피벗 카드가 확정되었습니다.`
+    });
+  }
+
+  async function continueAfterPivot() {
+    if (!allPivotsResolved) {
+      await updateRoom({ sysMessage: "아직 피벗 카드가 확정되지 않은 팀이 있습니다. 미완료 팀을 확인하거나 강제 확정하세요." });
+      return;
+    }
+    const freshSnap = await getDoc(currentRoomRef());
+    if (!freshSnap.exists()) return;
+    const freshRoom = freshSnap.data();
+    const settings = freshRoom.simulationSettings || appSettings.simulation;
+    const patch = {};
+    for (const [key, team] of Object.entries(freshRoom.teams || {})) {
+      if (!activeTeamKeys.includes(key)) continue;
+      const scenario = getPivotScenario(settings, team.midDecision?.resolvedScenario);
+      const pivot = makePivotTeamPatch(team, scenario, 12);
+      patch[`teams.${key}.currentAsset`] = pivot.currentAsset;
+      patch[`teams.${key}.pivotModifiers`] = pivot.pivotModifiers;
+      patch[`teams.${key}.pivotScenarioId`] = pivot.pivotScenarioId;
+      patch[`teams.${key}.assetHistory`] = pivot.assetHistory;
+    }
+    await updateRoom({ ...patch, pivotPhase: "applied", currentEvent: null, currentEventApplied: true, sysMessage: "피벗 전략을 적용했습니다. 13개월 차 경영 시뮬레이션을 시작합니다." });
+    await runSimulation(12);
   }
 
   function clearSimulationTimers() {
@@ -1260,6 +1360,7 @@ export default function AdminPage() {
         const eventPreviewPatch = Object.fromEntries(
           Object.keys(freshRoom.teams || {}).map((key) => [`teams.${key}.lastEventImpact`, null])
         );
+        const isPivotMonth = nextMonth === 12 && freshRoom.pivotPhase !== "applied";
         const isLastMonth = nextMonth >= SIMULATION_MONTHS;
         await updateRoom({
           ...eventPreviewPatch,
@@ -1268,9 +1369,9 @@ export default function AdminPage() {
           currentEventApplied: false,
           eventHistory: nextEventHistory,
           currentDecision: null,
-          simulationRunning: !isLastMonth,
-          simulationOwner: isLastMonth ? null : adminSessionIdRef.current,
-          simulationHeartbeatAt: isLastMonth ? 0 : Date.now(),
+          simulationRunning: !isLastMonth && !isPivotMonth,
+          simulationOwner: isLastMonth || isPivotMonth ? null : adminSessionIdRef.current,
+          simulationHeartbeatAt: isLastMonth || isPivotMonth ? 0 : Date.now(),
           status: STATUSES.SIMULATION,
           resultFinalizing: false,
           sysMessage: `${nextMonth}개월 차 이벤트: ${event.title}`
@@ -1282,7 +1383,7 @@ export default function AdminPage() {
           applySimulationEvent(event, nextMonth).catch(() => {});
         }, SIMULATION_EVENT_APPLY_DELAY);
 
-        if (isLastMonth) {
+        if (isLastMonth || isPivotMonth) {
           // Keep the pending apply timer so the final month's impact still lands.
           stopLocalSimulation({ keepPendingApply: true });
           stopSimulationBgm();
@@ -1316,10 +1417,12 @@ export default function AdminPage() {
 
   async function resumeSimulation() {
     if (room?.status !== STATUSES.SIMULATION || simulationActiveRef.current) return;
+    if (["voting", "ready"].includes(room?.pivotPhase)) return;
     const snapshot = await getDoc(currentRoomRef()).catch(() => null);
     const savedRoom = snapshot?.exists() ? snapshot.data() : room;
     if (savedRoom.currentEvent && savedRoom.currentEventApplied === false) {
       await applySimulationEvent(savedRoom.currentEvent, Number(savedRoom.currentMonth || 0)).catch(() => {});
+      if (Number(savedRoom.currentMonth || 0) === 12) return;
     }
     const savedMonth = Number(savedRoom.currentMonth || 0);
     if (savedMonth >= SIMULATION_MONTHS) return;
@@ -1439,7 +1542,7 @@ export default function AdminPage() {
           <div className="event-notice-window"><strong>{room.sysMessage}</strong></div>
         </div>
       )}
-      {room.status === STATUSES.SIMULATION && !room.simulationRunning && Number(room.currentMonth || 0) < SIMULATION_MONTHS && (
+      {room.status === STATUSES.SIMULATION && !room.simulationRunning && Number(room.currentMonth || 0) < SIMULATION_MONTHS && !["voting", "ready"].includes(room.pivotPhase) && (
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4">
           <div>
             <b className="block text-amber-900">시뮬레이션이 {Number(room.currentMonth || 0)}개월 차에서 일시정지되어 있습니다.</b>
@@ -1462,6 +1565,9 @@ export default function AdminPage() {
         <PhaseProgressPanel room={room} teams={teams} students={students} />
         <PhaseTimerControl timer={room.phaseTimer} onStart={(minutes) => setPhaseTimer(minutes)} onExtend={() => setPhaseTimer(1, { extend: true })} onStop={() => setPhaseTimer(null)} />
       </div>
+      {pivotUiVisible && ["voting", "ready"].includes(room.pivotPhase) && (
+        <PivotAdminPanel room={room} teams={teams} students={students} settings={room.simulationSettings || appSettings.simulation} onForce={resolveTeamPivot} onContinue={continueAfterPivot} />
+      )}
       {room.resultFinalizing && <ResultFinalizingShowcase />}
       <FanfareOnResult status={room.status} />
       <ResultFireworks status={room.status} />
@@ -1511,7 +1617,7 @@ export default function AdminPage() {
           {investmentChartVisible && <InvestmentChart teams={teams} />}
           {room.status === STATUSES.RESULT && (
             <div ref={resultBoardRef}>
-              <ResultBoard rankedTeams={rankedTeams} teams={teams} students={students} room={room} />
+              <ResultBoard rankedTeams={rankedTeams} rankedInvestors={rankedInvestors} teams={teams} students={students} room={room} />
             </div>
           )}
         </div>
@@ -1522,7 +1628,7 @@ export default function AdminPage() {
       {opinionTeam && <AiOpinionModal team={opinionTeam} onClose={() => setOpinionTeam(null)} />}
       {studentMenu && <StudentManageModal menu={studentMenu} students={students} teams={teams} onClose={() => setStudentMenu(null)} onAssign={assignStudentToTeam} onKick={removeStudent} onMove={moveStudentToTeam} onSetLeader={setLeader} />}
       {room.aiEvaluationStatus === "evaluating" && <AiEvaluationShowcase />}
-      {room.status === STATUSES.SIMULATION && room.currentEvent && Number(room.currentMonth || 0) < SIMULATION_MONTHS && (
+      {room.status === STATUSES.SIMULATION && room.currentEvent && Number(room.currentMonth || 0) < SIMULATION_MONTHS && (!['voting', 'ready'].includes(room.pivotPhase) || !pivotUiVisible) && (
         <AdminEventShowcase
           event={room.currentEvent}
           month={room.currentMonth || 0}
@@ -1641,6 +1747,36 @@ function TeamGrid({ roomStatus, teams, students, onOpenStudentMenu, onRenameTeam
     </section>
   );
 }
+function PivotAdminPanel({ room, teams, students, settings, onForce, onContinue }) {
+  const activeTeams = getTeamEntries(teams).filter(([key]) => Object.values(students).some((student) => student.team === key));
+  const scenarios = settings?.pivotScenarios || PIVOT_SCENARIOS;
+  const complete = activeTeams.every(([, team]) => team.midDecision?.resolvedScenario);
+  return (
+    <section className="pivot-admin-panel">
+      <div className="pivot-admin-heading">
+        <div><p>12개월 피벗 의사결정</p><h2>팀별 선택 완료 현황</h2></div>
+        <button type="button" disabled={!complete} onClick={onContinue}><Play size={18} /> 계속 진행</button>
+      </div>
+      <div className="pivot-admin-grid">
+        {activeTeams.map(([key, team]) => {
+          const members = getStudentsByTeam(students, key);
+          const votes = team.midDecision?.votes || {};
+          const voted = members.filter((member) => votes[member.uid]).length;
+          const resolved = team.midDecision?.resolvedScenario;
+          const scenario = scenarios.find((item) => item.id === resolved);
+          return (
+            <article key={key} className={resolved ? "pivot-team-done" : ""}>
+              <div><strong>{team.teamName}</strong><span>{voted}/{members.length}명 선택 완료</span></div>
+              {resolved ? <b>{scenario?.icon} {scenario?.title || resolved}</b> : <button type="button" onClick={() => onForce(key, true)}>교사 강제 확정</button>}
+            </article>
+          );
+        })}
+      </div>
+      {!complete && <p className="pivot-admin-help">수업이 지연되면 교사가 현재 표를 기준으로 강제 확정할 수 있습니다. 투표가 전혀 없으면 첫 번째 카드가 적용됩니다.</p>}
+    </section>
+  );
+}
+
 /** Per-phase completion summary with the names of students/teams still pending. */
 function PhaseProgressPanel({ room, teams, students }) {
   const [showPending, setShowPending] = useState(false);
@@ -2003,7 +2139,7 @@ function AiOpinionModal({ team, onClose }) {
   ), document.body);
 }
 
-function ResultBoard({ rankedTeams, teams, students, room }) {
+function ResultBoard({ rankedTeams, rankedInvestors, teams, students, room }) {
   const winner = rankedTeams[0];
   const podium = [rankedTeams[1], rankedTeams[0], rankedTeams[2]];
   const participantCount = Object.keys(students).length;
@@ -2011,6 +2147,7 @@ function ResultBoard({ rankedTeams, teams, students, room }) {
   const totalInitial = rankedTeams.reduce((sum, team) => sum + getAssetChange(team).initial, 0);
   const classRate = totalInitial ? ((totalFinal - totalInitial) / totalInitial) * 100 : 0;
   const finishedAt = new Intl.DateTimeFormat("ko-KR", { dateStyle: "long", timeStyle: "short" }).format(new Date(room.updatedAt || Date.now()));
+  const insights = buildResultInsights(teams);
 
   return (
     <section className="print-report report-board">
@@ -2031,6 +2168,17 @@ function ResultBoard({ rankedTeams, teams, students, room }) {
           </div>
         </div>
       </header>
+
+      <section className="result-analysis-dashboard">
+        <div className="result-analysis-heading"><span>DATA BADGES</span><h3>최종 분석 대시보드</h3></div>
+        <div className="result-analysis-grid">
+          {insights.map((insight) => (
+            <article key={insight.label}><span>{insight.icon}</span><div><p>{insight.label}</p><strong>{insight.value} <em>(최종결과 {insight.rank}위)</em></strong></div></article>
+          ))}
+        </div>
+      </section>
+
+      <InvestorRanking investors={rankedInvestors} />
 
       {winner && (
         <article className="winner-report-card mt-5 overflow-hidden rounded-lg bg-gradient-to-br from-amber-300 via-orange-500 to-rose-600 p-1 shadow-[0_18px_45px_rgba(245,158,11,0.35)]">
@@ -2137,6 +2285,25 @@ function ResultBoard({ rankedTeams, teams, students, room }) {
           );
         })}
       </div>
+    </section>
+  );
+}
+
+function InvestorRanking({ investors = [], compact = false, currentUid = "" }) {
+  const top = investors.slice(0, compact ? 3 : 10);
+  const myIndex = investors.findIndex((investor) => investor.uid === currentUid);
+  return (
+    <section className={`investor-ranking ${compact ? "investor-ranking-compact" : ""}`}>
+      <div className="investor-ranking-heading"><div><p>나는 투자왕</p><h3>투자 포트폴리오 TOP {compact ? 3 : 10}</h3></div><Crown size={28} /></div>
+      <div className="investor-ranking-list">
+        {top.map((investor, index) => (
+          <div key={investor.uid} className={`${index < 3 ? `investor-top-${index + 1}` : ""} ${investor.uid === currentUid ? "investor-me" : ""}`}>
+            <b>{index + 1}</b><span><strong>{investor.nickname}</strong><small>{investor.team ? `${investor.team}팀 · ` : ""}수익률 {investor.portfolio.rate >= 0 ? "+" : ""}{investor.portfolio.rate.toFixed(1)}%</small></span><em>{formatWon(investor.portfolio.finalValue)}</em>
+          </div>
+        ))}
+      </div>
+      {compact && myIndex >= 0 && <div className="investor-my-rank"><span>내 투자 순위</span><strong>{myIndex + 1}위 · {formatWon(investors[myIndex].portfolio.finalValue)}</strong></div>}
+      {!top.length && <p className="investor-ranking-empty">확정된 투자 내역이 없습니다.</p>}
     </section>
   );
 }
