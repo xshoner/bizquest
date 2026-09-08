@@ -3875,6 +3875,26 @@ select {
   color: #be123c;
 }
 
+.gemini-health-heading { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+.gemini-health-heading > div { min-width: 0; }
+.gemini-health-heading .settings-secondary-button { flex: none; margin-top: 0; }
+.gemini-health-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; margin-top: 6px; }
+.gemini-health-card { display: flex; align-items: center; gap: 12px; min-height: 76px; padding: 14px 16px; border: 1px solid #e2e8f0; border-radius: 14px; background: #f8fafc; }
+.gemini-health-card > div { display: grid; gap: 4px; }
+.gemini-health-card strong { color: #0f172a; font-size: 14px; }
+.gemini-health-card small { color: #64748b; font-size: 12px; font-weight: 800; }
+.gemini-health-light { width: 18px; height: 18px; flex: none; border: 3px solid #cbd5e1; border-radius: 50%; background: #e2e8f0; box-shadow: 0 0 0 4px rgba(148,163,184,.12); }
+.gemini-health-ok { border-color: #86efac; background: #f0fdf4; }
+.gemini-health-ok .gemini-health-light { border-color: #86efac; background: #16a34a; animation: gemini-health-green 900ms ease-in-out infinite alternate; }
+.gemini-health-error { border-color: #fda4af; background: #fff1f2; }
+.gemini-health-error .gemini-health-light { border-color: #fda4af; background: #e11d48; animation: gemini-health-red 650ms ease-in-out infinite alternate; }
+.gemini-health-checking .gemini-health-light { border-color: #a5b4fc; background: #6366f1; animation: gemini-health-checking 750ms ease-in-out infinite alternate; }
+.gemini-health-message { margin: 0; color: #3730a3; font-size: 12px; font-weight: 900; }
+.gemini-health-message-error { color: #be123c; }
+@keyframes gemini-health-green { from { opacity:.35; box-shadow:0 0 0 3px rgba(22,163,74,.12); } to { opacity:1; box-shadow:0 0 0 7px rgba(22,163,74,.24),0 0 16px rgba(22,163,74,.65); } }
+@keyframes gemini-health-red { from { opacity:.35; box-shadow:0 0 0 3px rgba(225,29,72,.12); } to { opacity:1; box-shadow:0 0 0 7px rgba(225,29,72,.24),0 0 16px rgba(225,29,72,.68); } }
+@keyframes gemini-health-checking { from { transform:scale(.75); opacity:.4; } to { transform:scale(1); opacity:1; } }
+
 .phase-overlay {
   position: fixed;
   inset: 0;
@@ -6598,6 +6618,17 @@ select {
 .pivot-card dt { font-size: 13px; line-height: 1.35; }
 .pivot-card dd { font-size: 13px; line-height: 1.42; }
 
+/* Fill the pivot cards with a stronger reading hierarchy instead of empty vertical space. */
+.pivot-card { padding: 18px; }
+.pivot-card-icon { font-size: 38px; }
+.pivot-card > small { margin-top: 8px; padding: 5px 9px; font-size: 12px; }
+.pivot-card h3 { margin-top: 10px; font-size: clamp(23px,5.8vw,30px); line-height: 1.08; letter-spacing: -.035em; }
+.pivot-card > p { margin-top: 9px; color: #475569; font-size: 14px; font-weight: 750; line-height: 1.5; }
+.pivot-card dl { gap: 8px; padding-top: 12px; }
+.pivot-card dl div { padding: 10px 11px; }
+.pivot-card dt { font-size: 14px; }
+.pivot-card dd { margin-top: 4px; font-size: 14px; }
+
 .investment-view-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-top: 14px; padding: 4px; border-radius: 14px; background: #e2e8f0; }
 .investment-view-tabs button { min-height: 44px; border-radius: 11px; color: #64748b; font-weight: 1000; }
 .investment-view-tabs button[aria-selected="true"] { color: #fff; background: #4f46e5; box-shadow: 0 8px 18px rgba(79,70,229,.22); }
@@ -6656,6 +6687,11 @@ select {
     margin: 0 auto;
   }
   .pivot-card dt, .pivot-card dd { font-size: 11px; }
+}
+
+@media (max-width: 640px) {
+  .gemini-health-heading { align-items: stretch; flex-direction: column; }
+  .gemini-health-grid { grid-template-columns: 1fr; }
 }
 
 /* Final results begin with a dense, comparable company ranking. */

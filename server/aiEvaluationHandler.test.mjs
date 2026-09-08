@@ -212,13 +212,34 @@ async function run() {
     assert.deepEqual(fetchImpl.geminiCalls, ["primary-key", "secondary-key"]);
   }
 
-  // Ordinary 400 responses are request errors and must not consume another key.
+  // Any primary-key response failure immediately tries the secondary key.
   {
     const fetchImpl = mockFallbackFetch(400, "bad request");
     const fallbackEnv = { ...env, GEMINI_API_KEY: "primary-key", GEMINI_API_KEY_2: "secondary-key" };
     const response = await handleAiEvaluationRequest({ method: "POST", env: fallbackEnv, authorization: `Bearer ${teacherToken}`, rawBody: body(), fetchImpl });
-    assert.equal(response.status, 502);
-    assert.deepEqual(fetchImpl.geminiCalls, ["primary-key"]);
+    assert.equal(response.status, 200);
+    assert.deepEqual(fetchImpl.geminiCalls, ["primary-key", "secondary-key"]);
+  }
+
+  // A transport failure on the primary and malformed 200 response both use the secondary key.
+  {
+    const calls = [];
+    const fetchImpl = async (url, init = {}) => {
+      if (String(url).startsWith("https://firestore.googleapis.com/")) return new Response(JSON.stringify(roomDocument), { status: 200 });
+      const key = init.headers["x-goog-api-key"];
+      calls.push(key);
+      if (key === "primary-key") throw new TypeError("network unavailable");
+      return new Response(geminiBody, { status: 200 });
+    };
+    const response = await handleAiEvaluationRequest({ method: "POST", env: { ...env, GEMINI_API_KEY: "primary-key", GEMINI_API_KEY_2: "secondary-key" }, authorization: `Bearer ${teacherToken}`, rawBody: body(), fetchImpl });
+    assert.equal(response.status, 200);
+    assert.deepEqual(calls, ["primary-key", "secondary-key"]);
+  }
+  {
+    const fetchImpl = mockFallbackFetch(200, "not json");
+    const response = await handleAiEvaluationRequest({ method: "POST", env: { ...env, GEMINI_API_KEY: "primary-key", GEMINI_API_KEY_2: "secondary-key" }, authorization: `Bearer ${teacherToken}`, rawBody: body(), fetchImpl });
+    assert.equal(response.status, 200);
+    assert.deepEqual(fetchImpl.geminiCalls, ["primary-key", "secondary-key"]);
   }
 
   // If every key is rejected, the final key response and a safe attempt count are returned.

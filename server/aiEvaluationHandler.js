@@ -113,21 +113,43 @@ async function callGemini({ apiKey, model, prompt, fetchImpl }) {
   }
 }
 
-function isRetryableGeminiFailure(response, responseText = "") {
-  if ([401, 403, 429].includes(response.status)) return true;
-  if (response.status >= 500 && response.status <= 599) return true;
-  return response.status === 400 && /API_KEY_INVALID|API key not valid/i.test(responseText);
-}
-
-export async function callGeminiWithFallback({ apiKeys, model, prompt, fetchImpl }) {
+export async function callGeminiWithFallback({ apiKeys, model, prompt, fetchImpl, parseResponse }) {
   let lastResult;
+  let lastError;
   for (let index = 0; index < apiKeys.length; index += 1) {
-    lastResult = await callGemini({ apiKey: apiKeys[index], model, prompt, fetchImpl });
-    if (lastResult.response.ok || !isRetryableGeminiFailure(lastResult.response, lastResult.responseText)) {
+    try {
+      lastResult = await callGemini({ apiKey: apiKeys[index], model, prompt, fetchImpl });
+    } catch (error) {
+      lastError = error;
+      continue;
+    }
+    if (lastResult.response.ok && parseResponse) {
+      try {
+        const parsed = parseResponse(lastResult.responseText);
+        return { ...lastResult, parsed, attemptCount: index + 1, keyCount: apiKeys.length };
+      } catch (error) {
+        // A 200 response with an empty/truncated/malformed answer is still a key-specific
+        // Gemini response failure. Try the secondary key immediately.
+        lastResult = { ...lastResult, parseError: error };
+        continue;
+      }
+    }
+    if (lastResult.response.ok || index === apiKeys.length - 1) {
       return { ...lastResult, attemptCount: index + 1, keyCount: apiKeys.length };
     }
   }
+  if (!lastResult && lastError) throw lastError;
   return { ...lastResult, attemptCount: apiKeys.length, keyCount: apiKeys.length };
+}
+
+function parseGeminiEvaluation(responseText) {
+  const completion = JSON.parse(responseText);
+  const text = (completion.candidates?.[0]?.content?.parts || [])
+    .filter((part) => !part.thought)
+    .map((part) => part?.text || "")
+    .join("");
+  if (!text) throw new Error("No text was returned by Gemini.");
+  return JSON.parse(stripJsonFence(text));
 }
 
 /**
@@ -142,7 +164,9 @@ export async function callGeminiWithFallback({ apiKeys, model, prompt, fetchImpl
 export async function handleAiEvaluationRequest({ method, authorization, rawBody, env, fetchImpl = fetch }) {
   if (method !== "POST") return textResponse(405, "Method Not Allowed");
 
-  const geminiApiKeys = [env?.GEMINI_API_KEY, env?.GEMINI_API_KEY_2, env?.GEMINI_API_KEY_3]
+  // The primary key is always attempted first. The secondary key is reserved for an
+  // immediate retry when the primary has a credential/quota/network/response problem.
+  const geminiApiKeys = [env?.GEMINI_API_KEY, env?.GEMINI_API_KEY_2]
     .map((value) => String(value || "").trim())
     .filter(Boolean);
   if (!geminiApiKeys.length) return textResponse(500, "GEMINI_API_KEY environment variable is missing.");
@@ -190,7 +214,13 @@ export async function handleAiEvaluationRequest({ method, authorization, rawBody
 
   let gemini;
   try {
-    gemini = await callGeminiWithFallback({ apiKeys: geminiApiKeys, model: GEMINI_MODEL, prompt, fetchImpl });
+    gemini = await callGeminiWithFallback({
+      apiKeys: geminiApiKeys,
+      model: GEMINI_MODEL,
+      prompt,
+      fetchImpl,
+      parseResponse: parseGeminiEvaluation
+    });
   } catch (err) {
     return textResponse(504, `Gemini request failed: ${String(err?.message || err).slice(0, 200)}`);
   }
@@ -204,13 +234,8 @@ export async function handleAiEvaluationRequest({ method, authorization, rawBody
     return textResponse(502, `Gemini responded with ${response.status}. ${responseText.slice(0, 300)}`);
   }
 
-  try {
-    const completion = JSON.parse(responseText);
-    const text = (completion.candidates?.[0]?.content?.parts || []).filter((part) => !part.thought).map((part) => part?.text || "").join("");
-    if (!text) throw new Error("No text was returned by Gemini.");
-    const raw = JSON.parse(stripJsonFence(text));
-    return jsonResponse(200, { evaluation: normalizeAiEvaluation(raw, team), source: "gemini" });
-  } catch (err) {
-    return textResponse(502, `Gemini returned malformed JSON: ${String(err?.message || err).slice(0, 200)}`);
+  if (gemini.parseError) {
+    return textResponse(502, `Gemini returned malformed JSON after ${gemini.attemptCount} attempt(s): ${String(gemini.parseError?.message || gemini.parseError).slice(0, 200)}`);
   }
+  return jsonResponse(200, { evaluation: normalizeAiEvaluation(gemini.parsed, team), source: "gemini" });
 }

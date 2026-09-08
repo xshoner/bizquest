@@ -1437,12 +1437,19 @@ export default function AdminPage() {
         if (isLastMonth || isPivotMonth) {
           // Keep the pending apply timer so the final month's impact still lands.
           stopLocalSimulation({ keepPendingApply: true });
-          terminalAudioTimerRef.current = window.setTimeout(() => {
+          terminalAudioTimerRef.current = window.setTimeout(async () => {
             terminalAudioTimerRef.current = null;
             stopSimulationBgm();
             if (isLastMonth) {
-              updateRoom({ currentEvent: null, currentEventApplied: true, sysMessage: `${SIMULATION_MONTHS}개월 경영 시뮬레이션이 종료되었습니다. 최종 결과를 공개해 주세요.` }).catch(() => {});
-              playSimulationFinale();
+              // Keep the final event visible until its asset impact is durably applied.
+              // Calling this again is safe because applySimulationEvent is idempotent.
+              await applySimulationEvent(event, nextMonth).catch(() => {});
+              const completedSnap = await getDoc(currentRoomRef()).catch(() => null);
+              const completedRoom = completedSnap?.exists() ? completedSnap.data() : null;
+              if (completedRoom?.currentEventApplied === true) {
+                await updateRoom({ currentEvent: null, sysMessage: `${SIMULATION_MONTHS}개월 경영 시뮬레이션이 종료되었습니다. 최종 결과를 공개해 주세요.` }).catch(() => {});
+                playSimulationFinale();
+              }
             }
           }, SIMULATION_EVENT_DELAY);
           return;
@@ -1609,6 +1616,12 @@ export default function AdminPage() {
           <button type="button" onClick={resumeSimulation} className="inline-flex items-center gap-2 rounded-xl bg-amber-600 px-5 py-3 font-bold text-white"><Play size={18} /> 계속하기</button>
         </div>
       )}
+      {room.status === STATUSES.SIMULATION && Number(room.currentMonth || 0) >= SIMULATION_MONTHS && !room.currentEvent && !room.resultFinalizing && (
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4">
+          <div><b className="block text-emerald-900">24개월 경영 시뮬레이션 완료</b><span className="text-sm text-emerald-700">마지막 이벤트 반영이 끝났습니다. 최종 결과 공개를 기다리고 있습니다.</span></div>
+          <button type="button" onClick={finalizeResults} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-3 font-bold text-white"><Trophy size={18} /> 최종 결과 공개</button>
+        </div>
+      )}
       {["interrupted", "error"].includes(room.aiEvaluationStatus) && (
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-indigo-200 bg-indigo-50 px-5 py-4">
           <div>
@@ -1690,7 +1703,8 @@ export default function AdminPage() {
         <AdminEventShowcase
           event={room.currentEvent}
           month={room.currentMonth || 0}
-          running={Boolean(simulationRunning || room.simulationRunning)}
+          running={Number(room.currentMonth || 0) >= SIMULATION_MONTHS ? true : Boolean(simulationRunning || room.simulationRunning)}
+          terminal={Number(room.currentMonth || 0) >= SIMULATION_MONTHS}
           onPause={pauseSimulation}
           onResume={resumeSimulation}
         />
@@ -1818,20 +1832,20 @@ function TeamGrid({ roomStatus, teams, students, onOpenStudentMenu, onRenameTeam
     </section>
   );
 }
-function AdminEventShowcase({ event, month, running, onPause, onResume }) {
+function AdminEventShowcase({ event, month, running, terminal, onPause, onResume }) {
   const factor = BUSINESS_FACTORS.find((item) => item.id === event.factor);
   useEffect(() => {
     playWhoosh();
   }, [event.id, month]);
   return createPortal((
     <div className={`event-showcase event-showcase-admin ${running ? "" : "event-showcase-paused"}`}>
-      <button
+      {!terminal && <button
         type="button"
         onClick={running ? onPause : onResume}
         className={`event-showcase-control ${running ? "event-showcase-control-pause" : "event-showcase-control-play"}`}
       >
         {running ? <><Pause size={22} /> PAUSE</> : <><Play size={22} /> PLAY</>}
-      </button>
+      </button>}
       <div className="event-spark event-spark-one" />
       <div className="event-spark event-spark-two" />
       <div className="event-showcase-stage">

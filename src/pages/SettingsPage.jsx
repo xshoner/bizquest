@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { AlertTriangle, KeyRound, RotateCcw, Save, Settings, Trash2 } from "lucide-react";
-import { collection, db, deleteDoc, doc, getDocs, setDoc } from "../firebase.js";
+import { Activity, AlertTriangle, KeyRound, RotateCcw, Save, Settings, Trash2 } from "lucide-react";
+import { collection, db, deleteDoc, doc, getCurrentIdToken, getDocs, setDoc } from "../firebase.js";
 import { createManagedTeacher, readLocalTeacherRegistry, useTeacherAuth } from "../hooks/useTeacherAuth.js";
 import { deleteRoomDeep } from "../lib/roomStore.js";
 import { APP_SETTINGS_PATH, DEFAULT_APP_SETTINGS, LOCAL_APP_SETTINGS_KEY, mergeAppSettings, useAppSettings } from "../lib/appSettings.js";
@@ -36,6 +36,7 @@ export default function SettingsPage() {
   const [managedUsers, setManagedUsers] = useState([]);
   const [localUsers, setLocalUsers] = useState(() => readLocalTeacherRegistry());
   const [managedForm, setManagedForm] = useState({ id: "", password: "", email: "" });
+  const [geminiCheck, setGeminiCheck] = useState({ state: "idle", keys: null, message: "" });
 
   const teacherUsers = useMemo(
     () => uniqueUsers([...registryUsers, ...managedUsers, ...localUsers]),
@@ -79,6 +80,25 @@ export default function SettingsPage() {
 
   function updateManagedField(key, value) {
     setManagedForm((current) => ({ ...current, [key]: value }));
+  }
+
+  async function checkGeminiKeys() {
+    setGeminiCheck({ state: "checking", keys: null, message: "두 API 키를 각각 짧게 호출하는 중입니다..." });
+    try {
+      const idToken = await getCurrentIdToken(true);
+      const response = await fetch("/api/gemini-health", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${idToken}` }
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.error || `점검 요청 실패 (HTTP ${response.status})`);
+      }
+      const payload = await response.json();
+      setGeminiCheck({ state: "done", keys: payload.keys, message: `${payload.model} 호출 점검 완료` });
+    } catch (err) {
+      setGeminiCheck({ state: "error", keys: null, message: err.message || "Gemini API 키를 점검하지 못했습니다." });
+    }
   }
 
   function updatePivotScenario(index, key, value) {
@@ -306,6 +326,30 @@ export default function SettingsPage() {
       )}
 
       <div className="settings-grid">
+        <section className="settings-panel settings-panel-wide gemini-health-panel">
+          <div className="gemini-health-heading">
+            <div>
+              <h2><Activity size={20} /> Gemini API 키 호출 점검</h2>
+              <p className="settings-help">서버 환경변수의 기본키와 보조키를 각각 최소 입력·출력으로 실제 호출합니다. 키 값은 브라우저로 전송하지 않습니다.</p>
+            </div>
+            <button type="button" className="settings-secondary-button" onClick={checkGeminiKeys} disabled={!authState.loggedIn || geminiCheck.state === "checking"}>
+              <Activity size={16} /> {geminiCheck.state === "checking" ? "점검 중..." : "두 키 호출 점검"}
+            </button>
+          </div>
+          {!authState.loggedIn && <p className="settings-status settings-status-error">호출 점검은 교사 계정 로그인 후 사용할 수 있습니다.</p>}
+          <div className="gemini-health-grid">
+            {[["primary", "GEMINI_API_KEY · 기본키"], ["secondary", "GEMINI_API_KEY_2 · 보조키"]].map(([key, label]) => {
+              const result = geminiCheck.keys?.[key];
+              const tone = result ? (result.ok ? "ok" : "error") : geminiCheck.state === "checking" ? "checking" : "idle";
+              return <article key={key} className={`gemini-health-card gemini-health-${tone}`}>
+                <span className="gemini-health-light" aria-label={result?.ok ? "정상" : result ? "이상" : "미점검"} />
+                <div><strong>{label}</strong><small>{result ? `${result.message}${result.latencyMs !== undefined ? ` · ${result.latencyMs}ms` : ""}` : geminiCheck.state === "checking" ? "호출 확인 중" : "아직 점검하지 않았습니다."}</small></div>
+              </article>;
+            })}
+          </div>
+          {geminiCheck.message && <p className={`gemini-health-message ${geminiCheck.state === "error" ? "gemini-health-message-error" : ""}`}>{geminiCheck.message}</p>}
+        </section>
+
         <section className="settings-panel">
           <h2><KeyRound size={20} /> 교사 회원 관리</h2>
           <p className="settings-help">회원가입한 계정과 관리자가 생성한 계정을 공용 목록에서 확인합니다.</p>

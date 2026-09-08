@@ -107,8 +107,7 @@ Content-Type: application/json
 | 변수 | 위치 | 설명 |
 |---|---|---|
 | `GEMINI_API_KEY` | Cloudflare Pages → Settings → Environment variables | 필수 |
-| `GEMINI_API_KEY_2` | 동일 | 선택, 기본 키의 쿼터·인증·일시 장애 시 자동 폴백 |
-| `GEMINI_API_KEY_3` | 동일 | 선택, 추가 폴백 키 |
+| `GEMINI_API_KEY_2` | 동일 | 보조키, 기본 키의 HTTP 오류·쿼터·인증·네트워크·응답 형식 문제 시 즉시 자동 폴백 |
 | `FIREBASE_PROJECT_ID` | 동일 | 선택, 기본값 `startup-5ec16` |
 
 로컬 `.env`는 절대 커밋하지 마세요(`.gitignore`에 포함).
