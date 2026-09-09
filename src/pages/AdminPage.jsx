@@ -75,8 +75,8 @@ import { deleteRoomDeep, deleteTeamDeep, moveStudent, removeStudentDeep, resetRo
 import { useAppSettings } from "../lib/appSettings.js";
 import { roomDocRef, useRoom } from "../hooks/useRoom.js";
 import { loginTeacher, logoutTeacher, registerTeacher, useTeacherAuth } from "../hooks/useTeacherAuth.js";
-import simulationBgm from "../images/bgm01.mp3";
-import bizQuestLogo from "../images/bizquest-logo.png";
+import { useAdminBgm } from "../hooks/useAdminBgm.js";
+
 import heroBackgroundImage from "../images/landing-hero-ai-v2.webp";
 import processRoadmapImage from "../images/landing-process-roadmap.webp";
 import { AiEvaluationShowcase, EventCardVisual, FanfareOnResult, ResultFinalizingShowcase, ResultFireworks } from "../components/shared/Effects.jsx";
@@ -566,7 +566,7 @@ export default function AdminPage() {
   const aiHeartbeatRef = useRef(null);
   const finalizeTimerRef = useRef(null);
   const adminSessionIdRef = useRef(makeAdminSessionId());
-  const bgmRef = useRef(null);
+  const bgm = useAdminBgm(roomId, room?.status);
   const resultBoardRef = useRef(null);
   const pivotResolvingRef = useRef(false);
   const previousPhaseRef = useRef(null);
@@ -645,31 +645,10 @@ export default function AdminPage() {
     }
   }, [appSettings.defaultRoomTitle, roomId, roomTitle]);
 
-  function ensureSimulationBgm() {
-    if (!bgmRef.current) {
-      bgmRef.current = new Audio(simulationBgm);
-      bgmRef.current.loop = true;
-      bgmRef.current.volume = 0.42;
-    }
-    return bgmRef.current;
-  }
+  function playSimulationBgm() { bgm.play(); }
+  function pauseSimulationBgm() { bgm.pause(); }
+  function stopSimulationBgm() { bgm.stop(); }
 
-  function playSimulationBgm() {
-    const audio = ensureSimulationBgm();
-    audio.play().catch(() => {});
-  }
-
-  function pauseSimulationBgm() {
-    if (bgmRef.current) bgmRef.current.pause();
-  }
-
-  function stopSimulationBgm() {
-    if (!bgmRef.current) return;
-    bgmRef.current.pause();
-    bgmRef.current.currentTime = 0;
-  }
-
-  const studentUrl = roomId ? `${getStudentOrigin(appSettings.studentOriginHost)}/room/${roomId}?owner=${encodeURIComponent(authState.user?.uid || "")}` : "";
   const students = room?.students || {};
   const teams = room?.teams || {};
   const rankedTeams = useMemo(() => rankTeams(teams), [teams]);
@@ -1586,17 +1565,15 @@ export default function AdminPage() {
   return (
     <section className="admin-dashboard mx-auto max-w-7xl px-5 py-6">
       <header className="admin-topbar">
-        <div className="bizquest-brand" aria-label="비즈퀘스트">
-          <img className="bizquest-logo-image" src={bizQuestLogo} alt="" />
-          <span>
-            <span className="bizquest-name"><b>BIZ</b>QUEST</span>
-            <span className="bizquest-tagline">아이디어를 창업으로, 가능성을 현실로</span>
-          </span>
-        </div>
+        <Link to="/" className="landing-logo" aria-label="BizQuest 메인으로 이동">
+          <span><Rocket size={24} /></span>
+          <strong>{appSettings.landing?.brandName || "BizQuest"}</strong>
+        </Link>
         <div className="admin-room-meta">
           <span><FileText size={22} /><b>방 제목</b>{room.roomTitle}</span>
           <span><Hash size={24} /><b>방 코드</b>{roomId}</span>
           <span><Flag size={22} /><b>현재단계</b>{STATUS_LABELS[room.status]}</span>
+          {bgm.available && <button type="button" onClick={bgm.toggle} data-bgm-control className="phase-reset" aria-label={bgm.playing ? "현재 단계 BGM 중지" : "현재 단계 BGM 재생"}>{bgm.playing ? <Pause size={17} /> : <Play size={17} />} BGM {bgm.playing ? "중지" : "재생"}</button>}
           <button onClick={resetRoom} className="phase-reset"><RotateCcw size={17} /> 초기화</button>
         </div>
       </header>
@@ -2059,7 +2036,7 @@ function AiOpinionModal({ team, onClose }) {
             return (
               <div key={factor.id} className="rounded-lg border border-slate-200 p-3 text-sm">
                 <div className="flex items-center justify-between gap-2"><b>{factor.name}</b><span className={`rounded-full px-3 py-1 text-xs font-black ${gradeClassName(item?.grade || "보통")}`}>{item?.grade || "보통"}</span></div>
-                <p className="mt-1 text-slate-600">{item?.reason || factor.description}</p>
+                <p className="mt-1 text-slate-600">{item?.reason || factor.description}</p>{factor.effect && <p className="mt-2 text-xs font-bold text-indigo-600">{factor.effect}</p>}
               </div>
             );
           })}
@@ -2091,5 +2068,5 @@ function makeAiEvaluationMessage(evaluations = {}) {
   if (fallbackCount > 0) {
     return `AI 평가 완료: Gemini 성공 ${aiSuccessCount}팀, 기본 평가 적용 ${fallbackCount}팀. 평가의견에서 실패 사유를 확인하세요.`;
   }
-  return `AI 사업계획서 평가가 완료되었습니다. 팀 패널에서 15개 지표와 1~2줄 종합의견을 확인하세요.`;
+  return `AI 사업계획서 평가가 완료되었습니다. 팀 패널에서 17개 지표와 1~2줄 종합의견을 확인하세요.`;
 }

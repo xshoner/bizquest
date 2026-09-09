@@ -1,3 +1,4 @@
+import { openEvaluationReport } from "../../lib/evaluationReport.js";
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { BUSINESS_FACTORS } from "../../data/gameData.js";
@@ -31,12 +32,15 @@ export function Simulation({ room, student }) {
 }
 
 export function StudentAiEvaluationReport({ team }) {
+  const [popupBlocked, setPopupBlocked] = useState(false);
   return (
     <article className="student-ai-report-compact">
       <div className="student-ai-report-heading">
         <div><p>AI 평가 결과</p><h3>{team.teamName} 사업계획</h3></div>
         {team.idea?.serviceName && <span>{team.idea.serviceName}</span>}
       </div>
+      <button type="button" className="touch-button mt-3 rounded-lg bg-indigo-600 px-4 py-3 font-bold text-white" onClick={() => setPopupBlocked(!openEvaluationReport(team))}>세부내용보기</button>
+      {popupBlocked && <p role="alert" className="mt-2 text-sm text-rose-700">팝업이 차단되었습니다. 이 사이트의 팝업을 허용한 뒤 다시 눌러주세요.</p>}
       <div className="student-ai-grade-list">
         {BUSINESS_FACTORS.map((factor) => {
           const grade = getEvaluationFactor(team, factor.id)?.grade || "보통";

@@ -447,10 +447,11 @@ export default function SettingsPage() {
 
         <section className="settings-panel settings-panel-wide">
           <h2><Settings size={20} /> AI 평가 팩터별 등급 배율</h2>
+          {BUSINESS_FACTORS.filter((factor) => factor.effect).map((factor) => <p key={factor.id} className="settings-help"><b>{factor.id} {factor.name}</b> — {factor.effect}. 모든 이벤트에 고정 비율로 적용됩니다.</p>)}
           <p className="settings-help">F01~F15 각 평가 항목의 양호·보통·취약 결과가 경영 시뮬레이션에 반영되는 강도를 조정합니다.</p>
           <div className="settings-rate-table settings-factor-table">
             <div className="settings-rate-head"><b>팩터</b><b>양호</b><b>보통</b><b>취약</b></div>
-            {BUSINESS_FACTORS.map((factor) => (
+            {BUSINESS_FACTORS.filter((factor) => !factor.effect).map((factor) => (
               <div key={factor.id} className="settings-rate-row">
                 <span><b>{factor.id}</b> {factor.name}</span>
                 {["양호", "보통", "취약"].map((grade) => <input key={grade} aria-label={`${factor.id} ${grade} 배율`} type="number" min="0" step="0.1" value={form.simulation.factorGradeMultipliers[factor.id]?.[grade] ?? 1} onChange={(e) => updateFactorMultiplier(factor.id, grade, e.target.value)} />)}

@@ -376,6 +376,16 @@ export function applyRiskMultiplier(team, event, simulationSettings = {}, month 
     if (rate > 0 && grade === "양호") rate *= Number(modifiers.goodPositiveMultiplier || 1);
     if (Number(modifiers.frozenAfterMonth || 0) > 0) rate = 0;
   }
+  // Global assessments modify each team's event rate throughout all 24 months.
+  // Missing assessments in existing rooms stay neutral until re-evaluation.
+  const assessmentGrade = (id) => (month > 12 ? modifiers.factorOverrides?.[id] : null) || team.aiEvaluation?.factors?.[id]?.grade;
+  const feasibility = assessmentGrade("F16");
+  const duplication = assessmentGrade("F17");
+  if (rate > 0) rate *= feasibility === "양호" ? 1.05 : feasibility === "보통" ? 1.015 : 1;
+  if (rate < 0) {
+    const extraLoss = (feasibility === "취약" ? 0.035 : 0) + (duplication === "취약" ? 0.037 : duplication === "양호" ? -0.05 : duplication === "보통" ? -0.025 : 0);
+    rate *= 1 + extraLoss;
+  }
   rate = Math.round(rate * 100) / 100;
   const beforeAsset = Number(team.currentAsset || 0);
   const afterAsset = Math.round(beforeAsset * (1 + rate / 100));

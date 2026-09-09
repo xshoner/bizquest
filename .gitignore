@@ -16,3 +16,5 @@ Thumbs.db
 .wrangler/
 .local-tools/
 *-debug.log
+test-results/
+playwright-report/

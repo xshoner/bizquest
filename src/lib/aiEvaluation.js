@@ -100,7 +100,10 @@ export function buildEvaluationPrompt(team, comparisonTeams = []) {
   return [
     "너는 청소년 창업 수업의 성장 중심 평가 위원이야.",
     "평가 대상은 전문 창업가가 아니라 아이디어를 처음 구체화하는 학생이다. 투자심사 수준의 완성도를 요구하지 말고, 학생이 표현한 가능성과 논리적 연결을 먼저 인정해.",
-    "아래 사업계획을 15가지 팩터(F01~F15)에 대해 각각 '양호', '보통', '취약' 중 하나로 판정해. F15 사업계획서 성실성은 서버가 글자 수로 최종 확정하므로 나머지 팩터의 내용 평가에 집중해.",
+    "아래 사업계획을 17가지 팩터(F01~F17)에 대해 각각 '양호', '보통', '취약' 중 하나로 판정해. F15 사업계획서 성실성은 서버가 글자 수로 최종 확정하므로 나머지 팩터의 내용 평가에 집중해.",
+    "F16 실현가능성: 깊은 추론 없이 사업계획 전반의 실제 실현 가능성과 자연법칙 위배 여부를 빠르게 간단히 본다. 구현 가능성이 충분하면 양호, 확인이 필요하면 보통, 명백한 실현 장애가 있으면 취약으로 판정한다.",
+    "F17 중복성: 깊은 추론 없이 동일하거나 유사한 아이템 또는 구현방법의 존재와 그 우려를 빠르게 간단히 본다. 차별성이 뚜렷하면 양호, 유사성이 우려되나 확인이 필요하면 보통, 중복 우려가 크면 취약으로 판정한다. 실제 검색이나 특허 조사를 수행했다고 주장하지 않는다.",
+    "F16과 F17의 reason은 단정하지 말고 '~그럴 가능성이 있다', '~부분을 검토할 필요가 있다'와 같은 신중한 표현으로 서술한다.",
     "판정 기준: '양호'는 아이디어와 팩터의 연결이 구체적이거나 강점이 보이는 경우, '보통'은 의미 있는 아이디어가 있으나 설명이 짧거나 보완 여지가 있는 경우, '취약'은 해당 팩터가 명백히 빠졌거나 서로 모순되거나 실제 위험이 뚜렷한 경우다.",
     "의미 있는 문장과 사업 아이디어가 확인되면 '보통'을 기본값으로 삼아라. 단지 설명이 짧거나 전문 용어가 없다는 이유만으로 '취약'을 주지 마라.",
     "모든 팩터를 같은 등급으로 기계적으로 채우지 말고, 각 팀의 고객·문제·해결책·수익·홍보 내용에 근거해 강점과 보완점을 분별력 있게 나눠라. 다른 팀과 등급 개수를 억지로 맞추지는 마라.",
@@ -141,12 +144,12 @@ export function normalizeAiEvaluation(raw, team) {
     const grade = AI_GRADES.includes(item.grade) ? item.grade : "보통";
     factors[factor.id] = {
       grade,
-      reason: String(item.reason || factor.description).slice(0, 80)
+      reason: String(item.reason || (["F16", "F17"].includes(factor.id) ? `${factor.name} 부분을 검토할 필요가 있다.` : factor.description)).slice(0, 240)
     };
   }
 
   if (quality.valid) {
-    const weakFactors = BUSINESS_FACTORS.filter((factor) => factor.id !== "F15" && factors[factor.id].grade === "취약");
+    const weakFactors = BUSINESS_FACTORS.filter((factor) => !["F15", "F16", "F17"].includes(factor.id) && factors[factor.id].grade === "취약");
     const maximumWeakFactors = quality.length >= 120 ? 3 : 5;
     weakFactors.slice(maximumWeakFactors).forEach((factor) => {
       factors[factor.id] = {
@@ -212,7 +215,7 @@ export function makeFallbackAiEvaluation(team, error) {
     if (factor.id === "F10" && hasAny("여행", "오프라인", "배달", "매장", "야외")) grade = "취약";
     factors[factor.id] = factor.id === "F15" ? getPlanDiligenceAssessment(team) : {
       grade,
-      reason: `${factor.name} 관점에서 사업계획의 핵심 키워드를 기준으로 ${grade}로 판정했습니다.`
+      reason: ["F16", "F17"].includes(factor.id) ? `${factor.name}을 자동 대체 평가로 확정하기 어려워 관련 부분을 검토할 필요가 있다.` : `${factor.name} 관점에서 사업계획의 핵심 키워드를 기준으로 ${grade}로 판정했습니다.`
     };
   }
   return {

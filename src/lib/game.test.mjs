@@ -55,3 +55,28 @@ test("F15 성실성 등급과 관리자 배율이 전용 이벤트에 반영된�
   const affected = applyRiskMultiplier(team, event, { factorGradeMultipliers: { F15: { 양호: 1.5 } } }, 8);
   assert.equal(affected.lastEventImpact.rate, 27);
 });
+
+test("새 전역 팩터의 모든 등급 조합이 전·후반 개별 이벤트에 적용된다", () => {
+  const positive = { 양호: 21, 보통: 20.3, 취약: 20 };
+  const negative = { 양호: -19, 보통: -19.5, 취약: -20.74 };
+  for (const month of [1, 12, 13, 24]) {
+    for (const feasibility of Object.keys(positive)) {
+      for (const duplication of Object.keys(negative)) {
+        const team = { ...baseTeam, aiEvaluation: { factors: { F16: { grade: feasibility }, F17: { grade: duplication } } } };
+        const apply = (rate) => applyRiskMultiplier(team, { id: "E01", factor: "F01", rates: { 보통: rate } }, {}, month);
+        assert.equal(apply(20).lastEventImpact.rate, positive[feasibility]);
+        const expectedLoss = Math.round((negative[duplication] - (feasibility === "취약" ? 0.7 : 0)) * 100) / 100;
+        assert.equal(apply(-20).lastEventImpact.rate, expectedLoss);
+        assert.equal(apply(0).currentAsset, team.currentAsset);
+      }
+    }
+  }
+});
+
+test("새 팩터는 팀별로 적용되며 피벗 배율과 청산을 유지한다", () => {
+  const team = { ...baseTeam, aiEvaluation: { factors: { F16: { grade: "양호" }, F17: { grade: "취약" } } }, pivotModifiers: { eventRateMultiplier: 2 } };
+  const event = { id: "E01", factor: "F01", rates: { 보통: 10 } };
+  assert.equal(applyRiskMultiplier(team, event, {}, 13).lastEventImpact.rate, 21);
+  assert.equal(applyRiskMultiplier(baseTeam, event, {}, 13).lastEventImpact.rate, 10);
+  assert.equal(applyRiskMultiplier({ ...team, pivotModifiers: { frozenAfterMonth: 12 } }, event, {}, 13).lastEventImpact.rate, 0);
+});

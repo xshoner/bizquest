@@ -1,3 +1,4 @@
+import { restorePlanDraft, usePlanAutosave } from "../hooks/usePlanAutosave.js";
 ﻿import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { Award, Check, Crown, Lightbulb, Pencil, RotateCcw, Send } from "lucide-react";
@@ -169,7 +170,7 @@ export default function StudentPage() {
       {room.status === STATUSES.WAITING && <WaitingRoomStage room={room} uid={authUid} />}
       {room.status === STATUSES.C_LEVEL && <CLevelDiagnosis room={room} uid={authUid} student={student} />}
       {room.status === STATUSES.CARD_SELECT && <CardSelect room={room} uid={authUid} student={student} />}
-      {room.status === STATUSES.IDEATION && <Ideation room={room} uid={authUid} student={student} />}
+      {room.status === STATUSES.IDEATION && <Ideation key={`${room.roomId}:${student.team}:${authUid}`} room={room} uid={authUid} student={student} />}
       {room.status === STATUSES.AI_EVALUATION && <AiEvaluation room={room} student={student} />}
       {[STATUSES.INVESTMENT, STATUSES.SIMULATION, STATUSES.RESULT].includes(room.status) && <TeamFundingSummary room={room} student={student} />}
       {room.status === STATUSES.INVESTMENT && <InvestmentStage room={room} uid={authUid} student={student} />}
@@ -639,18 +640,20 @@ function Ideation({ room, uid, student }) {
     marketingStrategies: [],
     tagline: ""
   };
-  const [idea, setIdea] = useState(() => normalizeIdea(savedIdea, emptyIdea));
+  const draftKey = `bizquest:plan:${room.ownerUid}:${room.roomId}:${student.team}:${uid}`;
+  const [idea, setIdea] = useState(() => normalizeIdea(team?.ideaLocked || (savedIdea && team?.ideaSubmitted !== false) ? savedIdea : restorePlanDraft(draftKey, savedIdea), emptyIdea));
   const [editing, setEditing] = useState(!savedIdea || team?.ideaSubmitted === false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const isLeader = team?.leaderId === uid;
   const submitted = Boolean(savedIdea && team?.ideaSubmitted !== false);
   const locked = Boolean(team?.ideaLocked);
+  const autosave = usePlanAutosave({ key: draftKey, idea, savedIdea, enabled: isLeader && !locked && editing && !busy, ownerUid: room.ownerUid, roomId: room.roomId, teamKey: student.team });
 
   useEffect(() => {
-    if (savedIdea && !editing) setIdea(normalizeIdea(savedIdea, emptyIdea));
+    if (savedIdea && (!isLeader || !editing)) setIdea(normalizeIdea(savedIdea, emptyIdea));
     if (savedIdea && team?.ideaSubmitted === false) setEditing(true);
-  }, [savedIdea, editing, team?.ideaSubmitted]);
+  }, [savedIdea, editing, team?.ideaSubmitted, isLeader]);
 
   async function submitIdea() {
     if (!isLeader || locked || busy) return;
@@ -664,11 +667,9 @@ function Ideation({ room, uid, student }) {
     setError("");
     try {
       // Only our own team's fields are written; the room phase and other teams are never touched.
-      await updateOwnTeam(
-        room.ownerUid,
-        room.roomId,
-        student.team,
-        { idea: payload, ideaSubmitted: true, aiEvaluation: null },
+      await autosave.save(
+        payload,
+        true,
         otherTeamsSubmitted
           ? "모든 팀의 사업계획이 등록되었습니다. 교사가 사업계획 AI 평가 단계로 이동할 때까지 수정할 수 있습니다."
           : `${team?.teamName || "팀"}이 아이디어를 제출했습니다.`
@@ -729,13 +730,14 @@ function Ideation({ room, uid, student }) {
     );
   }
 
-  const disabled = !isLeader || locked;
+  const disabled = !isLeader || locked || busy;
 
   return (
     <section>
       <h2 className="text-2xl font-black">아이디어 및 사업계획수립</h2>
+      {isLeader && <p role="status" className="mt-2 text-sm text-slate-600">{autosave.status || "입력 내용은 자동저장됩니다."} · 최종 제출은 아래 버튼을 눌러주세요.</p>}
       <SelectedCardsStrip team={team} />
-      {disabled && <div className="mt-3 rounded-lg bg-amber-50 px-4 py-3 text-sm font-black text-amber-700 ring-1 ring-amber-200">{locked ? "관리자가 사업계획을 확정하여 더 이상 수정할 수 없습니다." : "팀장만 사업계획서를 입력하고 제출할 수 있습니다."}</div>}
+      {(!isLeader || locked) && <div className="mt-3 rounded-lg bg-amber-50 px-4 py-3 text-sm font-black text-amber-700 ring-1 ring-amber-200">{locked ? "관리자가 사업계획을 확정하여 더 이상 수정할 수 없습니다." : "팀장만 사업계획서를 입력하고 제출할 수 있습니다."}</div>}
       <CanvasBlock title="제품 및 서비스명">
         <input disabled={disabled} value={idea.serviceName} onChange={(event) => setIdea({ ...idea, serviceName: event.target.value })} className="w-full rounded-lg border border-slate-200 px-3 py-3 outline-none focus:border-indigo-500 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" placeholder="예: AI 공부 도우미, 펫케어 매니저" />
       </CanvasBlock>
