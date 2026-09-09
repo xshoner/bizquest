@@ -649,6 +649,7 @@ export default function AdminPage() {
   function pauseSimulationBgm() { bgm.pause(); }
   function stopSimulationBgm() { bgm.stop(); }
 
+  const studentUrl = roomId ? `${getStudentOrigin(appSettings.studentOriginHost)}/room/${roomId}?owner=${encodeURIComponent(authState.user?.uid || "")}` : "";
   const students = room?.students || {};
   const teams = room?.teams || {};
   const rankedTeams = useMemo(() => rankTeams(teams), [teams]);
