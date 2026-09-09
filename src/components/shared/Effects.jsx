@@ -75,7 +75,7 @@ export function ResultFinalizingShowcase({ variant = "stage" }) {
   ), document.body);
 }
 
-export function AiEvaluationShowcase() {
+export function AiEvaluationShowcase({ progress, currentTeam } = {}) {
   return createPortal((
     <div className="event-showcase ai-evaluation-showcase">
       <div className="event-spark event-spark-one" />
@@ -84,7 +84,7 @@ export function AiEvaluationShowcase() {
         <div className="event-showcase-copy event-showcase-copy-active">
           <p>사업계획 AI 평가</p>
           <h2>지금 모두의 사업계획을<br />비즈니스 전문 AI가 평가중입니다...</h2>
-          <span>잠시 후 팀별 평가 결과가 공개됩니다</span>
+          <span role="status" aria-live="polite">{progress ? `${progress.completed}/${progress.total}팀 처리 완료${currentTeam ? ` · ${currentTeam} 평가 중` : ""}` : "잠시 후 팀별 평가 결과가 공개됩니다"}</span>
         </div>
         <div className="ai-evaluation-loader" aria-hidden="true">
           <span />

@@ -1,7 +1,7 @@
 // Firestore write helpers for rooms and students.
 // Every helper writes with field paths or per-document batches so concurrent edits from students
 // and the teacher never overwrite each other (no whole-map `teams` / `students` writes).
-import { deleteField, getDocs, setDoc, updateDoc, writeBatch, db } from "../firebase.js";
+import { deleteField, doc, getDoc, getDocs, setDoc, updateDoc, writeBatch, db } from "../firebase.js";
 import { roomDocRef, studentDocRef, studentsCollectionRef } from "../hooks/useRoom.js";
 import { makeInitialRoom } from "./game.js";
 
@@ -32,7 +32,11 @@ export async function deleteRoomStudents(ownerUid, roomId) {
 /** Deletes a room together with its students sub-collection. */
 export async function deleteRoomDeep(ownerUid, roomId) {
   await deleteRoomStudents(ownerUid, roomId);
-  await commitInChunks([(batch) => batch.delete(roomDocRef(ownerUid, roomId))]);
+  const codeRef = doc(db, "roomCodes", roomId);
+  const code = await getDoc(codeRef);
+  const operations = [(batch) => batch.delete(roomDocRef(ownerUid, roomId))];
+  if (code.exists() && code.data().ownerUid === ownerUid) operations.push((batch) => batch.delete(codeRef));
+  await commitInChunks(operations);
 }
 
 /** Resets a room to its initial state and clears all student records. */

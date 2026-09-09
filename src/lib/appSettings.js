@@ -1,12 +1,10 @@
 import { migrateLandingCopy } from "./landingCopy.js";
-﻿import { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { auth, db, doc, getDoc, onAuthStateChanged } from "../firebase.js";
 import { DEFAULT_SIMULATION_SETTINGS, mergeSimulationSettings } from "../data/simulationSettings.js";
 
 export const DEFAULT_APP_SETTINGS = {
-  adminPasscode: "",
-  adminPasscodeChangedAt: 0,
-  defaultRoomTitle: "스타트업 히어로",
+  defaultRoomTitle: "BIZQUEST",
   studentOriginHost: "192.168.0.190",
   simulation: DEFAULT_SIMULATION_SETTINGS,
   landing: {
@@ -90,23 +88,19 @@ function readLocalAppSettings() {
     if (!cached) return null;
     const parsed = JSON.parse(cached);
     delete parsed.geminiApiKey;
+    delete parsed.adminPasscode;
+    delete parsed.adminPasscodeChangedAt;
     return parsed;
   } catch {
     return null;
   }
 }
 
-function newerSettings(primary, fallback) {
-  if (!primary) return fallback;
-  if (!fallback) return primary;
-  const primaryTime = Number(primary?.updatedAt || 0);
-  const fallbackTime = Number(fallback?.updatedAt || 0);
-  return primaryTime >= fallbackTime ? primary : fallback;
-}
-
 export function mergeAppSettings(settings = {}) {
   const sanitizedSettings = { ...settings };
   delete sanitizedSettings.geminiApiKey;
+  delete sanitizedSettings.adminPasscode;
+  delete sanitizedSettings.adminPasscodeChangedAt;
   const incomingLanding = migrateLandingCopy(settings.landing || {}, DEFAULT_APP_SETTINGS.landing);
   const flowSteps = Array.isArray(incomingLanding.flowSteps)
     ? incomingLanding.flowSteps
@@ -165,8 +159,9 @@ export function useAppSettings() {
         const snapshot = await getDoc(doc(db, ...APP_SETTINGS_PATH));
         if (!mounted || currentRequest !== requestId) return;
         const remoteSettings = snapshot.exists() ? snapshot.data() : {};
-        const localSettings = readLocalAppSettings();
-        setSettings(mergeAppSettings(newerSettings(localSettings, remoteSettings)));
+        const nextSettings = mergeAppSettings(remoteSettings);
+        setSettings(nextSettings);
+        try { localStorage.setItem(LOCAL_APP_SETTINGS_KEY, JSON.stringify(nextSettings)); } catch { /* Cache is optional. */ }
         setLoading(false);
       } catch (err) {
         if (!mounted) return;

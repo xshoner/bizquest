@@ -1,7 +1,9 @@
+import { teamPhaseState } from "../../lib/phaseProgress.js";
+import { isFallbackEvaluation } from "../../lib/aiEvaluation.js";
 import { useState } from "react";
 import { Award, ClipboardCheck, Cpu, Lightbulb, LineChart, MessageCircle, PieChart, Play, Trophy } from "lucide-react";
-import { STATUSES, STATUS_LABELS } from "../../data/gameData.js";
-import { PIVOT_SCENARIOS } from "../../data/simulationSettings.js";
+import { BUSINESS_FACTORS, SIMULATION_EVENTS, STATUSES, STATUS_LABELS } from "../../data/gameData.js";
+import { mergeSimulationSettings, PIVOT_SCENARIOS } from "../../data/simulationSettings.js";
 import { SIMULATION_MONTHS, getStudentsByTeam, getTeamEntries } from "../../lib/game.js";
 import { PHASE_TIMER_PRESETS_MIN, PhaseTimerDisplay } from "../../components/shared/PhaseTimer.jsx";
 
@@ -26,22 +28,31 @@ export function PivotAdminPanel({ room, teams, students, settings, onForce, onCo
   </section>;
 }
 
-export function PhaseProgressPanel({ room, teams, students }) {
+export function PhaseProgressPanel({ room, teams, students, onSelectTeam, onSelectStudent }) {
   const [showPending, setShowPending] = useState(false);
   const assigned = Object.values(students).filter((student) => student.team && teams[student.team]);
   const activeTeams = getTeamEntries(teams).filter(([key]) => assigned.some((student) => student.team === key));
+  const states = activeTeams.map(([key, team]) => ({ key, team, ...teamPhaseState(room.status, team, assigned.filter((s) => s.team === key)) }));
   let title = "", done = 0, total = 0, pending = [];
-  switch (room.status) {
-    case STATUSES.WAITING: title = "팀 배정"; total = Object.keys(students).length; done = assigned.length; pending = Object.values(students).filter((student) => !student.team).map((student) => student.nickname); break;
-    case STATUSES.C_LEVEL: title = "C레벨 자가진단 완료"; total = assigned.length; done = assigned.filter((student) => student.cLevelResult?.key).length; pending = assigned.filter((student) => !student.cLevelResult?.key).map((student) => student.nickname); break;
-    case STATUSES.CARD_SELECT: title = "카드 선택 완료 팀"; total = activeTeams.length; done = activeTeams.filter(([, team]) => team.trendCard && team.techCard).length; pending = activeTeams.filter(([, team]) => !(team.trendCard && team.techCard)).map(([, team]) => team.teamName); break;
-    case STATUSES.IDEATION:
-    case STATUSES.AI_EVALUATION: title = room.status === STATUSES.IDEATION ? "사업계획 제출 · 확정" : "사업계획 확정"; total = activeTeams.length; done = activeTeams.filter(([, team]) => team.ideaLocked).length; pending = activeTeams.filter(([, team]) => !team.ideaLocked).map(([, team]) => `${team.teamName}${team.idea && team.ideaSubmitted !== false ? " (확정 대기)" : " (미제출)"}`); break;
-    case STATUSES.INVESTMENT: title = "투자 확정"; total = assigned.length; done = assigned.filter((student) => student.investmentSubmitted).length; pending = assigned.filter((student) => !student.investmentSubmitted).map((student) => student.nickname); break;
-    default: return <div className="progress-panel"><p className="progress-panel-title">진행 현황</p><p className="text-sm font-bold text-slate-500">{room.status === STATUSES.SIMULATION ? `${room.currentMonth || 0} / ${SIMULATION_MONTHS}개월 진행` : "수업이 완료되었습니다."}</p>{room.status === STATUSES.SIMULATION && <div className="progress-bar"><b style={{ width: `${Math.min(100, ((room.currentMonth || 0) / SIMULATION_MONTHS) * 100)}%` }} /></div>}</div>;
+  if ([STATUSES.SIMULATION, STATUSES.RESULT].includes(room.status)) return <div className="progress-panel"><p className="progress-panel-title">{room.status === STATUSES.RESULT ? "수업 완료" : `경영 ${room.currentMonth || 0} / ${SIMULATION_MONTHS}개월`}</p></div>;
+  if ([STATUSES.C_LEVEL, STATUSES.INVESTMENT].includes(room.status)) {
+    title = room.status === STATUSES.C_LEVEL ? "자가진단 완료" : "투자 확정";
+    const remaining = assigned.filter((s) => room.status === STATUSES.C_LEVEL ? !s.cLevelResult?.key : !s.investmentSubmitted);
+    total = assigned.length; done = total - remaining.length;
+    pending = remaining.map((s) => ({ id: s.uid, label: s.nickname, select: () => onSelectStudent?.(s.uid) }));
+  } else {
+    title = { WAITING: "팀 구성 확정", CARD_SELECT: "카드 선택 완료", IDEATION: "사업계획 교사 확정", AI_EVALUATION: "평가 완료 (대체평가 제외)" }[room.status] || "진행 현황";
+    total = states.length; done = states.filter((s) => s.done).length;
+    pending = states.filter((s) => !s.done).map((s) => ({ id: s.key, label: `${s.team.teamName} · ${s.label}`, select: () => onSelectTeam?.(s.key) }));
   }
-  const percent = total ? Math.round((done / total) * 100) : 0;
-  return <div className="progress-panel"><div className="flex flex-wrap items-center justify-between gap-2"><p className="progress-panel-title">{title}</p><b className={`progress-count ${total && done === total ? "progress-count-done" : ""}`}>{done} / {total}{total && done === total ? " · 모두 완료" : ""}</b></div><div className="progress-bar"><b style={{ width: `${percent}%` }} /></div>{pending.length > 0 && <div className="mt-2"><button type="button" onClick={() => setShowPending((current) => !current)} className="text-xs font-black text-indigo-700">미완료 {pending.length}명/팀 {showPending ? "접기" : "보기"}</button>{showPending && <div className="mt-2 flex flex-wrap gap-1">{pending.map((name) => <span key={name} className="progress-pending-chip">{name}</span>)}</div>}</div>}</div>;
+  const fallbackCount = activeTeams.filter(([, t]) => isFallbackEvaluation(t.aiEvaluation)).length;
+  return <div className="progress-panel">
+    {room.status === STATUSES.WAITING && <p className="mb-2 text-sm">학생 팀 배정 {assigned.length}/{Object.keys(students).length}명 · 미배정 {Object.keys(students).length - assigned.length}명</p>}
+    <div className="flex flex-wrap justify-between gap-2"><p className="progress-panel-title">{title}</p><b>{done}/{total}{total > 0 && done === total ? " · 모두 완료" : ""}</b></div>
+    <div className="progress-bar"><b style={{ width: `${total ? done / total * 100 : 0}%` }} /></div>
+    {room.status === STATUSES.AI_EVALUATION && <p className="mt-2 text-sm">대체평가 {fallbackCount}팀 · 미평가 {activeTeams.filter(([, t]) => !t.aiEvaluation).length}팀</p>}
+    {pending.length > 0 && <div className="mt-2"><button type="button" onClick={() => setShowPending(!showPending)} className="text-sm font-semibold">미완료 {pending.length}명/팀 {showPending ? "접기" : "보기"}</button>{showPending && <div className="mt-2 flex flex-wrap gap-2">{pending.map((item) => <button type="button" key={item.id} onClick={item.select} className="progress-pending-chip">{item.label} →</button>)}</div>}</div>}
+  </div>;
 }
 
 export function PhaseTimerControl({ timer, onStart, onExtend, onStop }) {
@@ -51,4 +62,16 @@ export function PhaseTimerControl({ timer, onStart, onExtend, onStop }) {
 
 export function PhaseRail({ currentStatus, onPhaseClick }) {
   return <nav className="phase-rail mt-5" aria-label="진행 단계">{PHASES.map((phase, index) => { const Icon = PHASE_ICONS[phase] || Play; return <button key={phase} type="button" onClick={() => onPhaseClick(phase)} className={`phase-rail-button ${currentStatus === phase ? "phase-rail-button-active" : ""}`}><span className="phase-rail-number">{index + 1}</span><Icon className="phase-rail-icon" size={42} /><b>{phase === STATUSES.CARD_SELECT ? <><span>트렌드 및</span><span>기술카드 선택</span></> : STATUS_LABELS[phase]}</b></button>; })}</nav>;
+}
+
+export function SimulationSettingsSnapshot({ snapshot, defaults }) {
+  const settings = mergeSimulationSettings(snapshot || defaults);
+  return <details className="rounded-lg border border-slate-200 bg-white p-4"><summary className="cursor-pointer font-semibold">시뮬레이션 적용 설정</summary>
+    <p className="my-2 text-sm">{snapshot ? "현재 게임: 시뮬레이션 시작 시 고정된 값" : "시뮬레이션 시작 시 최신 기본값을 고정합니다."}</p><p className="text-xs">다음 게임 기본값은 운영자 설정에서 변경합니다.</p>
+    <div className="mt-3 max-h-80 overflow-auto text-xs">
+      {BUSINESS_FACTORS.map((factor) => { const values = (factor.effect ? settings.globalFactorMultipliers : settings.factorGradeMultipliers)[factor.id]; return <p key={factor.id} className="my-2">{factor.id} {factor.name}: 양호 {values?.양호 ?? 1} / 보통 {values?.보통 ?? 1} / 취약 {values?.취약 ?? 1}배</p>; })}
+      {SIMULATION_EVENTS.map((event) => <p key={event.id} className="my-3">{event.id} {event.title}<br />변동률 양호 {settings.eventRates[event.id].양호}% / 보통 {settings.eventRates[event.id].보통}% / 취약 {settings.eventRates[event.id].취약}%<br />상승 {settings.eventMultipliers[event.id].positive} / 하락 {settings.eventMultipliers[event.id].negative}배</p>)}
+      {settings.pivotScenarios.map((scenario) => <p key={scenario.id} className="my-3">{scenario.title}{scenario.primaryMultiplier !== undefined && <><br />주요 배율 {scenario.primaryMultiplier}</>}{scenario.secondaryMultiplier !== undefined && <> / 보조 배율 {scenario.secondaryMultiplier}</>}</p>)}
+    </div>
+  </details>;
 }

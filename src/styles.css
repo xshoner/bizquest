@@ -5442,3 +5442,20 @@ select {
   grid-template-columns: minmax(220px, 1fr) repeat(5, 90px);
   min-width: 740px;
 }
+
+/* Classroom dashboard: readable three-column cards on wide screens. */
+.app-stage .admin-dashboard { max-width: 1440px; }
+.admin-main-content, .admin-team-card { min-width: 0; }
+@media (min-width: 1380px) { .admin-dashboard .admin-team-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.team-filter { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.team-filter button, .team-detail-toggle { min-height: 36px; padding: 8px 12px; border: 1px solid #dbe1e8; border-radius: 10px; font-size: 13px; font-weight: 600; cursor: pointer; }
+.team-filter button[aria-pressed="true"] { background: #0f172a; color: white; }
+.team-phase-status { margin: 12px 0; font-size: 14px; font-weight: 700; color: #1d2b64; }
+.team-focused { outline: 3px solid #10b981; outline-offset: 3px; }
+.admin-dashboard .team-member-chip { font-size: 12px; min-height: 32px; }
+.admin-team-card details { margin-top: 10px; }
+.admin-team-card .admin-team-slogan-runner { animation: none; white-space: normal; }
+.admin-team-card .admin-team-slogan-viewport { overflow: visible; }
+.admin-team-card .admin-team-avatar-column { width: 54px; }
+.admin-team-card .mascot-avatar { max-width: 50px; max-height: 50px; }
+@media print { .team-filter, .team-detail-toggle { display: none; } }

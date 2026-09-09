@@ -1,3 +1,4 @@
+import { usePlatformAdmin } from "../hooks/usePlatformAdmin.js";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Activity, AlertTriangle, KeyRound, RotateCcw, Save, Settings, Trash2 } from "lucide-react";
@@ -26,10 +27,11 @@ function displayEmail(item) {
 export default function SettingsPage() {
   const authState = useTeacherAuth();
   const { settings, loading, error } = useAppSettings();
-  const [unlocked, setUnlocked] = useState(sessionStorage.getItem("bizquest-settings-unlocked") === "true");
-  const [passcode, setPasscode] = useState("");
+  const access = usePlatformAdmin(authState.user);
+  const unlocked = access.allowed;
   const [form, setForm] = useState(() => mergeAppSettings(settings));
   const [status, setStatus] = useState("");
+  const [savedForm, setSavedForm] = useState(null);
   const [busy, setBusy] = useState(false);
   const [roomCount, setRoomCount] = useState(null);
   const [resetConfirm, setResetConfirm] = useState("");
@@ -49,27 +51,9 @@ export default function SettingsPage() {
   }, [settings]);
 
   useEffect(() => {
-    if (!loading && authState.loggedIn && !settings.adminPasscode) setUnlocked(true);
-  }, [authState.loggedIn, loading, settings.adminPasscode]);
-
-  useEffect(() => {
     setLocalUsers(readLocalTeacherRegistry());
     if (unlocked) loadTeacherUsers();
   }, [unlocked, authState.user?.uid]);
-
-  function unlock() {
-    if (!settings.adminPasscode) {
-      setStatus("최초 관리자 패스코드를 설정하려면 먼저 교사 계정으로 로그인하세요.");
-      return;
-    }
-    if (passcode.trim() !== String(settings.adminPasscode)) {
-      setStatus("관리자 비밀번호가 맞지 않습니다.");
-      return;
-    }
-    sessionStorage.setItem("bizquest-settings-unlocked", "true");
-    setUnlocked(true);
-    setStatus("");
-  }
 
   function updateField(key, value) {
     setForm((current) => ({ ...current, [key]: value }));
@@ -146,6 +130,11 @@ export default function SettingsPage() {
     setBusy(true);
     setStatus("");
     try {
+      for (const scenario of form.simulation.pivotScenarios) {
+        for (const [key, value] of Object.entries(scenario)) {
+          if (typeof value === "number" && (!Number.isFinite(value) || (key.includes("Multiplier") && value < 0))) throw new Error("피벗 배율은 0 이상의 유효한 숫자여야 합니다.");
+        }
+      }
       for (const field of ["eventRates", "eventMultipliers", "factorGradeMultipliers", "globalFactorMultipliers"]) {
         for (const grades of Object.values(form.simulation[field])) {
           if (Object.values(grades).some((value) => !Number.isFinite(value) || (field !== "eventRates" && value < 0))) {
@@ -153,23 +142,20 @@ export default function SettingsPage() {
           }
         }
       }
-      const nextPasscode = String(form.adminPasscode || "").trim();
-      if (nextPasscode.length < 6) throw new Error("관리자 패스코드는 6자리 이상으로 설정하세요.");
-      if (!settings.adminPasscodeChangedAt && nextPasscode === String(settings.adminPasscode || "")) {
-        throw new Error("초기 관리자 패스코드를 새 값으로 변경해야 합니다.");
-      }
-      if (!authState.user?.uid) throw new Error("관리자 설정을 저장하려면 교사 계정 로그인이 필요합니다.");
+      if (!unlocked) throw new Error("운영자 권한이 필요합니다.");
       const cleanPayload = JSON.parse(JSON.stringify({
         ...mergeAppSettings(form),
-        adminPasscode: nextPasscode,
-        adminPasscodeChangedAt: nextPasscode !== settings.adminPasscode || !settings.adminPasscodeChangedAt ? Date.now() : settings.adminPasscodeChangedAt,
         updatedAt: Date.now()
       }));
       delete cleanPayload.geminiApiKey;
-      localStorage.setItem(LOCAL_APP_SETTINGS_KEY, JSON.stringify(cleanPayload));
+      delete cleanPayload.adminPasscode;
+      delete cleanPayload.adminPasscodeChangedAt;
+      setStatus("서버에 저장 중…");
       await setDoc(doc(db, ...APP_SETTINGS_PATH), cleanPayload);
-      setForm(cleanPayload);
-      setStatus("설정을 저장했습니다.");
+      try { localStorage.setItem(LOCAL_APP_SETTINGS_KEY, JSON.stringify(cleanPayload)); } catch { /* Server remains authoritative. */ }
+      setForm(mergeAppSettings(cleanPayload));
+      setSavedForm(mergeAppSettings(cleanPayload));
+      setStatus("서버 저장 완료 · 다음 시뮬레이션 시작부터 적용됩니다.");
     } catch (err) {
       setStatus(err.message || "설정 저장에 실패했습니다.");
     } finally {
@@ -298,7 +284,7 @@ export default function SettingsPage() {
     }));
   }
 
-  if (loading) return <div className="settings-page">설정을 불러오는 중입니다.</div>;
+  if (loading || access.loading) return <div className="settings-page">설정을 불러오는 중입니다.</div>;
 
   if (!unlocked) {
     return (
@@ -306,15 +292,7 @@ export default function SettingsPage() {
         <div className="settings-login">
           <Settings size={34} />
           <h1>관리자 설정</h1>
-          <p>설정 페이지 접근을 위해 관리자 비밀번호를 입력하세요.</p>
-          <input
-            type="password"
-            value={passcode}
-            onChange={(event) => setPasscode(event.target.value)}
-            onKeyDown={(event) => event.key === "Enter" && unlock()}
-            placeholder="관리자 비밀번호"
-          />
-          <button type="button" onClick={unlock}>접속하기</button>
+          <p>운영자 계정으로 로그인해야 전체 설정을 관리할 수 있습니다. 일반 교사는 자신의 게임방에서 수업을 진행할 수 있습니다.</p>
           {status && <p className="settings-status settings-status-error">{status}</p>}
           {error && <p className="settings-status settings-status-error">{error}</p>}
           <Link to="/">메인으로 돌아가기</Link>
@@ -336,9 +314,7 @@ export default function SettingsPage() {
 
       {status && <div className="settings-status">{status}</div>}
       {error && <div className="settings-status settings-status-error">{error}</div>}
-      {!settings.adminPasscodeChangedAt && (
-        <div className="settings-status settings-status-error">보안을 위해 초기 관리자 패스코드를 6자리 이상의 새 값으로 변경한 뒤 설정을 저장하세요.</div>
-      )}
+      <p className="settings-status" role="status">{JSON.stringify(form) !== JSON.stringify(savedForm || mergeAppSettings(settings)) ? "변경사항이 있습니다. 서버 저장 후 적용됩니다." : "저장된 기본 설정입니다."} 진행 중인 시뮬레이션은 시작할 때 저장된 설정을 유지합니다.</p>
 
       <div className="settings-grid">
         <section className="settings-panel settings-panel-wide gemini-health-panel">
@@ -400,8 +376,6 @@ export default function SettingsPage() {
 
         <section className="settings-panel">
           <h2><Settings size={20} /> 기본 설정</h2>
-          <label>관리자 비밀번호</label>
-          <input type="password" minLength={6} autoComplete="new-password" value={form.adminPasscode || ""} onChange={(event) => updateField("adminPasscode", event.target.value)} />
           <label>기본 방 제목</label>
           <input value={form.defaultRoomTitle || ""} onChange={(event) => updateField("defaultRoomTitle", event.target.value)} />
           <label>학생 접속 호스트</label>
@@ -467,6 +441,7 @@ export default function SettingsPage() {
           <button type="button" className="text-sm font-bold text-indigo-600" onClick={() => setForm((current) => ({ ...current, simulation: { ...current.simulation, factorGradeMultipliers: mergeSimulationSettings().factorGradeMultipliers, globalFactorMultipliers: mergeSimulationSettings().globalFactorMultipliers } }))}>팩터 코드 기본값으로 복원</button>
 
           <p className="settings-help">F01~F15의 기본 추가 배율은 1배입니다. F16은 양호·보통일 때 상승, 취약일 때 하락에 적용됩니다. F17은 모든 하락에 적용됩니다. 1.05배는 5% 가산, 0.95배는 5% 방어입니다. 저장된 설정은 다음 시뮬레이션 시작 시 적용됩니다.</p>
+          <p className="settings-help">계산 예시 (F16 양호만 적용): 기본 +10% → +{Number((10 * form.simulation.globalFactorMultipliers.F16.양호).toFixed(3))}%. F17 양호만 적용: 기본 -10% → {Number((-10 * form.simulation.globalFactorMultipliers.F17.양호).toFixed(3))}%.</p>
           <div className="settings-rate-table settings-factor-table">
             <div className="settings-rate-head"><b>팩터</b><b>양호</b><b>보통</b><b>취약</b></div>
             {BUSINESS_FACTORS.map((factor) => (

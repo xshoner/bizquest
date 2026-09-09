@@ -37,10 +37,12 @@ async function verifyTeacher({ authorization, projectId, fetchImpl }) {
   if (!idToken || !payload?.sub || (payload.aud && payload.aud !== projectId)) return false;
   if (payload.firebase?.sign_in_provider === "anonymous") return false;
 
-  // Firestore validates the token signature and the deployed isTeacher() rule.
-  const url = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/databases/(default)/documents/appSettings/global`;
+  // Firestore validates the token signature and the deployed platformAdmins rule.
+  const url = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/databases/(default)/documents/platformAdmins/${encodeURIComponent(payload.sub)}`;
   const response = await fetchImpl(url, { headers: { Authorization: `Bearer ${idToken}` } });
-  return response.ok || response.status === 404;
+  if (!response.ok) return false;
+  const document = await response.json();
+  return document.fields?.enabled?.booleanValue === true;
 }
 
 async function checkKey(apiKey, fetchImpl) {
@@ -82,7 +84,7 @@ export async function handleGeminiHealthRequest({ method, authorization, env, fe
   if (method !== "POST") return jsonResponse(405, { error: "Method Not Allowed" });
   const projectId = env?.FIREBASE_PROJECT_ID || DEFAULT_FIREBASE_PROJECT_ID;
   if (!(await verifyTeacher({ authorization, projectId, fetchImpl }))) {
-    return jsonResponse(401, { error: "교사 로그인이 필요합니다." });
+    return jsonResponse(401, { error: "운영자 로그인이 필요합니다." });
   }
 
   const keys = [env?.GEMINI_API_KEY, env?.GEMINI_API_KEY_2].map((value) => String(value || "").trim());

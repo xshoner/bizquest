@@ -1,5 +1,6 @@
-import { restorePlanDraft, usePlanAutosave } from "../hooks/usePlanAutosave.js";
-﻿import { useEffect, useMemo, useRef, useState } from "react";
+import { resolveRoomCode } from "../lib/roomDirectory.js";
+import { readPlanDraft, restorePlanDraft, usePlanAutosave } from "../hooks/usePlanAutosave.js";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { Award, Check, Crown, Lightbulb, Pencil, RotateCcw, Send } from "lucide-react";
 import { auth, onAuthStateChanged, setDoc, signInAnonymously } from "../firebase.js";
@@ -65,9 +66,19 @@ function ErrorBanner({ message, onDismiss }) {
 export default function StudentPage() {
   const { roomId } = useParams();
   const [searchParams] = useSearchParams();
-  const ownerUid = searchParams.get("owner") || "";
+  const suppliedOwner = searchParams.get("owner") || "";
+  const [resolvedOwner, setResolvedOwner] = useState("");
+  const [lookupError, setLookupError] = useState("");
+  const ownerUid = suppliedOwner || resolvedOwner;
+  useEffect(() => {
+    if (suppliedOwner) return;
+    let active = true;
+    setResolvedOwner(""); setLookupError("");
+    resolveRoomCode(roomId).then((owner) => { if (active) setResolvedOwner(owner); }).catch((err) => { if (active) setLookupError(err.message || "방 조회에 실패했습니다."); });
+    return () => { active = false; };
+  }, [roomId, suppliedOwner]);
   const [refreshKey, setRefreshKey] = useState(0);
-  const { room, loading, error } = useRoom(roomId, ownerUid, refreshKey);
+  const { room, loading, error } = useRoom(ownerUid ? roomId : null, ownerUid, refreshKey);
   const [nickname, setNickname] = useState("");
 
   useEffect(() => installAudioUnlock(), []);
@@ -130,6 +141,8 @@ export default function StudentPage() {
     }
   }
 
+  if (lookupError) return <MobileFrame><p role="alert">{lookupError}</p><button className="touch-button mt-4" onClick={reloadPage}>다시 시도</button><Link className="ml-4" to="/">메인으로 이동</Link></MobileFrame>;
+  if (!ownerUid) return <MobileFrame>방 코드를 확인하고 있습니다.</MobileFrame>;
   if (loading || !authReady) return <MobileFrame>방 정보를 불러오는 중입니다.</MobileFrame>;
   if (error) {
     return (
@@ -145,11 +158,13 @@ export default function StudentPage() {
   if (!ownerUid) return <MobileFrame><p>잘못된 QR 주소입니다. 교사가 새 QR을 보여주면 다시 입장하세요.</p><Link className="mt-4 inline-block font-bold text-indigo-600" to="/">메인으로 이동</Link></MobileFrame>;
   if (!room) return <MobileFrame><p>존재하지 않는 방입니다.</p><Link className="mt-4 inline-block font-bold text-indigo-600" to="/">메인으로 이동</Link></MobileFrame>;
 
+  if (!student && (room.closedAt || room.status === "CLOSED")) return <MobileFrame><p>종료된 방입니다.</p><Link to="/">메인으로 이동</Link></MobileFrame>;
+
   if (!student) {
     return (
       <MobileFrame>
         <div className="flex min-h-[80vh] flex-col justify-center">
-          <p className="text-sm font-bold text-indigo-600">스타트업 히어로</p>
+          <p className="text-sm font-bold text-indigo-600">BIZQUEST</p>
           <h1 className="mt-2 text-3xl font-black">{room.roomTitle}</h1>
           <p className="mt-2 text-slate-500">닉네임을 입력하고 체험에 입장하세요. 같은 브라우저로 다시 들어오면 기존 참여 정보가 유지됩니다.</p>
           <input value={nickname} maxLength={20} onChange={(event) => setNickname(event.target.value)} onKeyDown={(event) => event.key === "Enter" && joinRoom()} placeholder="예: 김창업" className="mt-6 rounded-lg border border-slate-200 px-4 py-4 text-lg outline-none focus:border-indigo-500" />
@@ -642,13 +657,14 @@ function Ideation({ room, uid, student }) {
   };
   const draftKey = `bizquest:plan:${room.ownerUid}:${room.roomId}:${student.team}:${uid}`;
   const [idea, setIdea] = useState(() => normalizeIdea(team?.ideaLocked || (savedIdea && team?.ideaSubmitted !== false) ? savedIdea : restorePlanDraft(draftKey, savedIdea), emptyIdea));
+  const [draftChoice, setDraftChoice] = useState(() => !team?.ideaLocked && (!savedIdea || team?.ideaSubmitted === false) ? readPlanDraft(draftKey) : null);
   const [editing, setEditing] = useState(!savedIdea || team?.ideaSubmitted === false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const isLeader = team?.leaderId === uid;
   const submitted = Boolean(savedIdea && team?.ideaSubmitted !== false);
   const locked = Boolean(team?.ideaLocked);
-  const autosave = usePlanAutosave({ key: draftKey, idea, savedIdea, enabled: isLeader && !locked && editing && !busy, ownerUid: room.ownerUid, roomId: room.roomId, teamKey: student.team });
+  const autosave = usePlanAutosave({ key: draftKey, idea, savedIdea, enabled: isLeader && !locked && editing && !busy && !draftChoice, ownerUid: room.ownerUid, roomId: room.roomId, teamKey: student.team });
 
   useEffect(() => {
     if (savedIdea && (!isLeader || !editing)) setIdea(normalizeIdea(savedIdea, emptyIdea));
@@ -656,7 +672,7 @@ function Ideation({ room, uid, student }) {
   }, [savedIdea, editing, team?.ideaSubmitted, isLeader]);
 
   async function submitIdea() {
-    if (!isLeader || locked || busy) return;
+    if (!isLeader || locked || busy || draftChoice) return;
     const activeTeams = Object.keys(room.teams || {}).filter((teamKey) => Object.values(room.students || {}).some((member) => member.team === teamKey));
     const otherTeamsSubmitted = activeTeams
       .filter((teamKey) => teamKey !== student.team)
@@ -730,11 +746,12 @@ function Ideation({ room, uid, student }) {
     );
   }
 
-  const disabled = !isLeader || locked || busy;
+  const disabled = !isLeader || locked || busy || Boolean(draftChoice);
 
   return (
     <section>
       <h2 className="text-2xl font-black">아이디어 및 사업계획수립</h2>
+      {isLeader && draftChoice && <div role="alert" className="my-3 rounded-xl border border-amber-300 bg-amber-50 p-4"><p className="font-semibold">이 기기에 저장된 초안이 있습니다.</p><p className="my-2 text-sm">서버 내용과 다를 수 있습니다. 복구할 내용을 선택하면 자동저장이 시작됩니다.</p><div className="flex gap-2"><button type="button" className="touch-button rounded-lg border bg-white p-3" onClick={() => { setIdea(normalizeIdea(draftChoice.idea, emptyIdea)); setDraftChoice(null); }}>기기 초안 복구</button><button type="button" className="touch-button rounded-lg border bg-white p-3" onClick={() => { setIdea(normalizeIdea(savedIdea, emptyIdea)); try { localStorage.removeItem(draftKey); } catch {} setDraftChoice(null); }}>서버 내용 사용</button></div></div>}
       {isLeader && <p role="status" className="mt-2 text-sm text-slate-600">{autosave.status || "입력 내용은 자동저장됩니다."} · 최종 제출은 아래 버튼을 눌러주세요.</p>}
       <SelectedCardsStrip team={team} />
       {(!isLeader || locked) && <div className="mt-3 rounded-lg bg-amber-50 px-4 py-3 text-sm font-black text-amber-700 ring-1 ring-amber-200">{locked ? "관리자가 사업계획을 확정하여 더 이상 수정할 수 없습니다." : "팀장만 사업계획서를 입력하고 제출할 수 있습니다."}</div>}

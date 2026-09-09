@@ -8,6 +8,7 @@ import {
   getDocs,
   getFirestore,
   onSnapshot,
+  runTransaction,
   setDoc,
   updateDoc,
   writeBatch
@@ -58,6 +59,7 @@ export {
   getDocs,
   onAuthStateChanged,
   onSnapshot,
+  runTransaction,
   setPersistence,
   setDoc,
   signInAnonymously,

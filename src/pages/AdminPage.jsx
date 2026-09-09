@@ -1,3 +1,5 @@
+import { teamPhaseState } from "../lib/phaseProgress.js";
+import { registerRoomCode } from "../lib/roomDirectory.js";
 ﻿import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -88,7 +90,7 @@ import { MascotAvatar } from "../components/shared/MascotAvatar.jsx";
 import { PHASE_TIMER_PRESETS_MIN, PhaseTimerDisplay } from "../components/shared/PhaseTimer.jsx";
 import { buildFullCsv, buildRoomJson, downloadTextFile, safeFileName } from "../lib/exportReport.js";
 import ResultBoard from "./admin/ResultBoard.jsx";
-import { PhaseProgressPanel, PhaseRail, PhaseTimerControl, PivotAdminPanel } from "./admin/PhasePanels.jsx";
+import { SimulationSettingsSnapshot, PhaseProgressPanel, PhaseRail, PhaseTimerControl, PivotAdminPanel } from "./admin/PhasePanels.jsx";
 
 /** Interval between simulated months. */
 const SIMULATION_EVENT_DELAY = 5000;
@@ -503,7 +505,7 @@ function AuthModal({ mode, onClose }) {
       if (isSignup) {
         await registerTeacher(form);
         await logoutTeacher();
-        window.alert("회원가입 완료! 이제 비트퀘스트의 팀원이 되었습니다.");
+        window.alert("회원가입 완료! 이제 BIZQUEST의 팀원이 되었습니다.");
         onClose();
         window.location.href = "/";
       } else {
@@ -569,7 +571,7 @@ export default function AdminPage() {
   const authState = useTeacherAuth();
   const { room, loading, error } = useRoom(authState.ready && authState.loggedIn ? roomId : null, authState.user?.uid);
   const { settings: appSettings } = useAppSettings();
-  const [roomTitle, setRoomTitle] = useState("스타트업 히어로");
+  const [roomTitle, setRoomTitle] = useState("BIZQUEST");
   const [joinCode, setJoinCode] = useState("");
   const [actionError, setActionError] = useState("");
   const [creating, setCreating] = useState(false);
@@ -667,7 +669,7 @@ export default function AdminPage() {
   }, [room?.status]);
 
   useEffect(() => {
-    if (!roomId && roomTitle === "스타트업 히어로" && appSettings.defaultRoomTitle) {
+    if (!roomId && roomTitle === "BIZQUEST" && appSettings.defaultRoomTitle) {
       setRoomTitle(appSettings.defaultRoomTitle);
     }
   }, [appSettings.defaultRoomTitle, roomId, roomTitle]);
@@ -808,6 +810,11 @@ export default function AdminPage() {
     }
   }, [allPivotsResolved, room?.pivotPhase]);
 
+  useEffect(() => {
+    if (!roomId || !authState.loggedIn || !room || room.ownerUid !== authState.user?.uid) return;
+    registerRoomCode(authState.user.uid, roomId).catch((err) => setActionError(`방 코드 등록 실패: ${err.message}. QR로 입장할 수 있습니다.`));
+  }, [roomId, authState.user?.uid, Boolean(room)]);
+
   async function createRoom() {
     setActionError("");
     if (!authState.loggedIn) {
@@ -818,8 +825,8 @@ export default function AdminPage() {
     setCreating(true);
     try {
       const nextRoomId = makeRoomId();
-      await setDoc(roomDocRef(authState.user.uid, nextRoomId), {
-        ...makeInitialRoom(nextRoomId, roomTitle.trim() || appSettings.defaultRoomTitle || "스타트업 히어로"),
+      await registerRoomCode(authState.user.uid, nextRoomId, {
+        ...makeInitialRoom(nextRoomId, roomTitle.trim() || appSettings.defaultRoomTitle || "BIZQUEST"),
         ownerUid: authState.user.uid
       });
       navigate(`/admin/${nextRoomId}`);
@@ -832,6 +839,7 @@ export default function AdminPage() {
 
   function joinAsStudent() {
     const code = joinCode.trim().toUpperCase();
+    if (!/^[A-Z0-9]{6}$/.test(code)) { setActionError("영문·숫자 6자리 방 코드를 입력하세요."); return; }
     if (code) navigate(`/room/${code}`);
   }
 
@@ -1125,7 +1133,7 @@ export default function AdminPage() {
     });
   }
 
-  async function evaluateBusinessPlans() {
+  async function evaluateBusinessPlans(retryFallback = false) {
     if (!roomId || evaluating) return;
     if (!allPlansSubmitted) {
       await updateRoom({
@@ -1142,10 +1150,10 @@ export default function AdminPage() {
 
     const evaluations = Object.fromEntries(
       activeTeamEntries
-        .filter(([, team]) => team.aiEvaluation)
+        .filter(([, team]) => team.aiEvaluation && !(retryFallback === true && isFallbackEvaluation(team.aiEvaluation)))
         .map(([teamKey, team]) => [teamKey, team.aiEvaluation])
     );
-    const pendingEntries = activeTeamEntries.filter(([, team]) => !team.aiEvaluation);
+    const pendingEntries = activeTeamEntries.filter(([, team]) => !team.aiEvaluation || (retryFallback === true && isFallbackEvaluation(team.aiEvaluation)));
     if (pendingEntries.length === 0) {
       await updateRoom({
         aiEvaluationStatus: "done",
@@ -1174,6 +1182,7 @@ export default function AdminPage() {
       startAiHeartbeat();
 
       for (const [teamKey, team] of pendingEntries) {
+        await updateRoom({ aiEvaluationCurrentTeam: team.teamName });
         try {
           evaluations[teamKey] = await requestAiEvaluation(teamKey, team);
         } catch (err) {
@@ -1509,7 +1518,7 @@ export default function AdminPage() {
     if (!confirmed) return;
     pauseSimulation();
     try {
-      await resetRoomDeep(authState.user.uid, roomId, room?.roomTitle || appSettings.defaultRoomTitle || "스타트업 히어로");
+      await resetRoomDeep(authState.user.uid, roomId, room?.roomTitle || appSettings.defaultRoomTitle || "BIZQUEST");
     } catch (err) {
       reportActionError(err, "방을 초기화하지 못했습니다.");
     }
@@ -1637,8 +1646,9 @@ export default function AdminPage() {
       )}
       <PhaseRail currentStatus={room.status} onPhaseClick={handlePhaseClick} />
       <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
-        <PhaseProgressPanel room={room} teams={teams} students={students} />
-        <PhaseTimerControl timer={room.phaseTimer} onStart={(minutes) => setPhaseTimer(minutes)} onExtend={() => setPhaseTimer(1, { extend: true })} onStop={() => setPhaseTimer(null)} />
+        <div><PhaseProgressPanel room={room} teams={teams} students={students} onSelectStudent={(uid) => setStudentMenu({ uid, mode: "assigned" })} onSelectTeam={(key) => { document.dispatchEvent(new CustomEvent("bizquest:focus-team", { detail: key })); }} />
+        {room.status === STATUSES.AI_EVALUATION && activeTeamEntries.some(([, team]) => !team.aiEvaluation || isFallbackEvaluation(team.aiEvaluation)) && <button className="admin-ui-button" disabled={evaluating || room.aiEvaluationStatus === "evaluating"} onClick={() => evaluateBusinessPlans(true)}>미평가·대체평가 팀만 다시 평가</button>}
+        </div><PhaseTimerControl timer={room.phaseTimer} onStart={(minutes) => setPhaseTimer(minutes)} onExtend={() => setPhaseTimer(1, { extend: true })} onStop={() => setPhaseTimer(null)} />
       </div>
       {pivotUiVisible && ["voting", "ready"].includes(room.pivotPhase) && (
         <PivotAdminPanel room={room} teams={teams} students={students} settings={room.simulationSettings || appSettings.simulation} onForce={resolveTeamPivot} onContinue={continueAfterPivot} />
@@ -1677,6 +1687,7 @@ export default function AdminPage() {
               {Object.values(students).filter((student) => !student.team).length === 0 && <p className="text-sm text-slate-500">대기 중인 학생이 없습니다.</p>}
             </div>
           </div>
+          <SimulationSettingsSnapshot snapshot={room.simulationSettings} defaults={appSettings.simulation} />
           <div className="print:hidden rounded-lg bg-white p-5 shadow-lift">
             <h2 className="flex items-center gap-2 font-black"><FileDown size={18} /> 내보내기</h2>
             <p className="mt-1 text-xs font-bold text-slate-500">{room.status === STATUSES.RESULT ? "최종 결과를 파일로 저장합니다." : "결과 CSV는 최종 결과 단계에서 저장할 수 있습니다. JSON 백업은 언제든 가능합니다."}</p>
@@ -1702,7 +1713,7 @@ export default function AdminPage() {
       {planTeam && <BusinessPlanModal team={planTeam} onClose={() => setPlanTeam(null)} />}
       {opinionTeam && <AiOpinionModal team={opinionTeam} onClose={() => setOpinionTeam(null)} />}
       {studentMenu && <StudentManageModal menu={studentMenu} students={students} teams={teams} onClose={() => setStudentMenu(null)} onAssign={assignStudentToTeam} onKick={removeStudent} onMove={moveStudentToTeam} onSetLeader={setLeader} />}
-      {room.aiEvaluationStatus === "evaluating" && <AiEvaluationShowcase />}
+      {room.aiEvaluationStatus === "evaluating" && <AiEvaluationShowcase progress={room.aiEvaluationProgress} currentTeam={room.aiEvaluationCurrentTeam} />}
       {room.status === STATUSES.SIMULATION && room.currentEvent && Number(room.currentMonth || 0) <= SIMULATION_MONTHS && (!['voting', 'ready'].includes(room.pivotPhase) || !pivotUiVisible) && (
         <AdminEventShowcase
           event={room.currentEvent}
@@ -1735,12 +1746,22 @@ function getTeamGradientStyle(teamKey) {
 }
 
 function TeamGrid({ roomStatus, teams, students, onOpenStudentMenu, onRenameTeam, onAddTeam, onDeleteTeam, onLockPlan, onOpenPlan, onOpenOpinion }) {
+  const [filter, setFilter] = useState("all");
+  const [focusedTeam, setFocusedTeam] = useState(null);
+  useEffect(() => { setFilter("all"); setFocusedTeam(null); }, [roomStatus]);
+  useEffect(() => {
+    const focus = (event) => { setFilter("all"); setFocusedTeam(event.detail); };
+    document.addEventListener("bizquest:focus-team", focus);
+    return () => document.removeEventListener("bizquest:focus-team", focus);
+  }, []);
+  useEffect(() => { if (focusedTeam) document.getElementById(`team-${focusedTeam}`)?.scrollIntoView({ behavior: "smooth", block: "center" }); }, [focusedTeam]);
   return (
     <section className="admin-team-section">
       <div className="admin-section-heading">
         <div><p>TEAM DASHBOARD</p><h2>팀 구성 현황</h2></div>
         <button onClick={onAddTeam} className="print:hidden admin-ui-button admin-ui-button-primary"><Plus size={15} /> 팀 추가</button>
       </div>
+      <div className="team-filter" aria-label="팀 상태 필터">{[["all", "전체"], ["pending", "미완료"], ["awaiting", "교사 확정 대기"]].map(([value, label]) => <button key={value} type="button" aria-pressed={filter === value} onClick={() => { setFilter(value); setFocusedTeam(null); }}>{label}</button>)}</div>
       <div className="admin-team-grid grid gap-4 md:grid-cols-2">
         {getTeamEntries(teams).map(([key, team], teamIndex) => {
           const cardSelectionComplete = Boolean(team.trendCard && team.techCard);
@@ -1750,8 +1771,10 @@ function TeamGrid({ roomStatus, teams, students, onOpenStudentMenu, onRenameTeam
             return String(a.nickname || "").localeCompare(String(b.nickname || ""), "ko");
           });
           const diversity = team.diversity;
+          const phase = teamPhaseState(roomStatus, team, members);
+          if ((filter === "pending" && phase.done) || (filter === "awaiting" && !phase.awaiting)) return null;
           return (
-            <section key={key} className={`admin-team-card admin-team-tone-${teamIndex % 6}`} style={getTeamGradientStyle(key)}>
+            <section id={`team-${key}`} key={key} className={`${focusedTeam === key ? "team-focused" : ""} admin-team-card admin-team-tone-${teamIndex % 6}`} style={getTeamGradientStyle(key)}>
               <div className="admin-team-identity">
                 <div className="admin-team-main-row">
                   <div className="admin-team-avatar-column">
@@ -1775,7 +1798,7 @@ function TeamGrid({ roomStatus, teams, students, onOpenStudentMenu, onRenameTeam
                   ) : <strong>아직 팀 구호를 정하지 않았습니다.</strong>}
                 </p>
               </div>
-              {diversity && (
+              {diversity && roomStatus === STATUSES.C_LEVEL && (
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   <span className={`diversity-badge diversity-badge-${diversity.key}`}>
                     <Sparkles size={13} /> {diversity.label}
@@ -1804,6 +1827,10 @@ function TeamGrid({ roomStatus, teams, students, onOpenStudentMenu, onRenameTeam
                 })}
                 {members.length === 0 && <span className="text-sm text-slate-400">팀원을 기다리는 중</span>}
               </div>
+              <p className="team-phase-status">{phase.label}</p>
+              {roomStatus === STATUSES.INVESTMENT && <InvestmentGauge team={team} />}
+              <details key={roomStatus} open={[STATUSES.CARD_SELECT, STATUSES.IDEATION, STATUSES.AI_EVALUATION].includes(roomStatus)}>
+              <summary className="team-detail-toggle">사업계획·평가 상세</summary>
               <div className={`admin-team-details ${cardSelectionComplete ? "admin-card-selection-complete" : "admin-card-selection-empty"}`}>
                 {cardSelectionComplete ? (
                   <div className="admin-card-selection-body">
@@ -1826,9 +1853,10 @@ function TeamGrid({ roomStatus, teams, students, onOpenStudentMenu, onRenameTeam
                   <button type="button" disabled={!team.idea || team.ideaSubmitted === false} onClick={() => onOpenPlan({ key, ...team })} className="admin-ui-button admin-ui-button-primary">{team.idea && team.ideaSubmitted !== false ? <><CheckCircle2 size={14} /> 사업계획 완료</> : <><FileText size={14} /> 사업계획 미등록</>}</button>
                   <button type="button" disabled={!team.idea || team.ideaSubmitted === false || team.ideaLocked} onClick={() => onLockPlan(key)} className="admin-ui-button admin-ui-button-secondary">{team.ideaLocked ? <><CheckCircle2 size={14} /> 확정됨</> : <><ShieldCheck size={14} /> 확정</>}</button>
                 </div>
-                <InvestmentGauge team={team} />
+                {roomStatus !== STATUSES.INVESTMENT && <InvestmentGauge team={team} />}
                 <AiEvaluationSummary team={team} onOpenOpinion={() => onOpenOpinion({ key, ...team })} />
-              </div>
+                {isFallbackEvaluation(team.aiEvaluation) && <p className="mt-2 text-sm text-amber-800">대체평가 적용: {team.aiEvaluation.errorMessage || "AI 연결 또는 응답 오류로 기본 평가를 적용했습니다."}</p>}
+              </div></details>
             </section>
           );
         })}

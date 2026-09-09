@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import { CircleDollarSign } from "lucide-react";
-import { INVESTMENT_BUDGET, INVESTMENT_STEP, formatWon, getTeamEntries, sumInvestments } from "../../lib/game.js";
+import { INVESTMENT_BUDGET, INVESTMENT_STEP, getTeamEntries, sumInvestments } from "../../lib/game.js";
 import { updateOwnStudent } from "../../lib/roomStore.js";
 import { StudentAiEvaluationReport } from "./SimulationStage.jsx";
+
+const formatInvestment = (value) => `${(Number(value || 0) / 10000).toLocaleString("ko-KR")}만 원`;
 
 const STALE_SCREEN_MESSAGE = "화면 정보가 오래되어 저장하지 못했습니다. 새로고침 버튼을 누르거나 다시 QR코드를 촬영하세요.";
 
@@ -47,6 +49,7 @@ export default function InvestmentStage({ room, uid, student }) {
   const availableTeams = getTeamEntries(room.teams).filter(([key]) => key !== student.team);
   const availableKeys = availableTeams.map(([key]) => key);
   const [investments, setInvestments] = useState(() => pickInvestments(student.investments, availableKeys));
+  const [directAmount, setDirectAmount] = useState("");
   const [directInputTeam, setDirectInputTeam] = useState(null);
   const [expandedTeam, setExpandedTeam] = useState(null);
   const [viewMode, setViewMode] = useState("compare");
@@ -60,7 +63,7 @@ export default function InvestmentStage({ room, uid, student }) {
 
   async function submit() {
     if (busy) return;
-    if (total > INVESTMENT_BUDGET) return setError(`투자 총액이 예산(${formatWon(INVESTMENT_BUDGET)})을 초과했습니다.`);
+    if (total > INVESTMENT_BUDGET) return setError(`투자 총액이 예산(${formatInvestment(INVESTMENT_BUDGET)})을 초과했습니다.`);
     setBusy(true); setError("");
     try {
       await updateOwnStudent(room.ownerUid, room.roomId, uid, { investments: pickInvestments(investments, availableKeys), investmentSubmitted: true });
@@ -75,13 +78,13 @@ export default function InvestmentStage({ room, uid, student }) {
     if (sumInvestments(next) <= INVESTMENT_BUDGET) { setInvestments(next); setLimitHint(""); return; }
     const remaining = Math.max(0, INVESTMENT_BUDGET - (total - Number(investments[teamKey] || 0)));
     setInvestments({ ...investments, [teamKey]: remaining });
-    setLimitHint(`잔여 투자금이 부족해 ${formatWon(remaining)}으로 조정했습니다.`);
+    setLimitHint(`잔여 투자금이 부족해 ${formatInvestment(remaining)}으로 조정했습니다.`);
   }
 
   return (
     <section>
       <h2 className="text-2xl font-black">가상 투자</h2>
-      <div className="mt-3 rounded-lg bg-slate-900 p-4 text-white"><p className="text-sm text-slate-300">잔여 투자금</p><p className="text-3xl font-black">{formatWon(INVESTMENT_BUDGET - total)}</p></div>
+      <div className="mt-3 rounded-lg bg-slate-900 p-4 text-white"><p className="text-sm text-slate-300">잔여 투자금</p><p className="text-3xl font-black">{formatInvestment(INVESTMENT_BUDGET - total)}</p></div>
       <div className="mt-3 rounded-lg bg-indigo-50 px-4 py-3 text-sm font-black leading-6 text-indigo-700 ring-1 ring-indigo-100"><p>우리 팀 사업에는 투자할 수 없습니다.</p><p>상대팀 사업내용을 보고 투자하세요.</p></div>
       {submitted && <div className="ticker-pulse mt-3 rounded-lg bg-rose-50 px-4 py-3 text-sm font-black text-rose-700">투자 완료. 금액을 바꾸고 다시 누르면 재확정됩니다.</div>}
       {limitHint && <div className="mt-3 rounded-lg bg-amber-50 px-4 py-3 text-sm font-bold text-amber-700 ring-1 ring-amber-200">{limitHint}</div>}
@@ -95,9 +98,9 @@ export default function InvestmentStage({ room, uid, student }) {
             {viewMode === "list" && <button type="button" onClick={() => setExpandedTeam(expanded ? null : key)} className="touch-button mt-3 w-full rounded-lg bg-indigo-50 px-3 py-2 text-sm font-black text-indigo-700">{expanded ? "사업 내용 및 AI 평가 접기" : "사업 내용 및 AI 평가 보기"}</button>}
             {expanded && <InvestmentTeamDetails team={team} />}
             <div className="investment-range-row"><button type="button" onClick={() => setAmount(key, Number(investments[key] || 0) - INVESTMENT_STEP)} aria-label={`${team.teamName} 투자금 100만원 줄이기`}>−</button><input type="range" min="0" max={INVESTMENT_BUDGET} step={INVESTMENT_STEP} value={investments[key] || 0} onChange={(event) => setAmount(key, event.target.value)} aria-label={`${team.teamName} 투자 금액`} className="w-full accent-indigo-600" /><button type="button" onClick={() => setAmount(key, Number(investments[key] || 0) + INVESTMENT_STEP)} aria-label={`${team.teamName} 투자금 100만원 늘리기`}>+</button></div>
-            <strong className="investment-current-amount">{formatWon(investments[key] || 0)}</strong>
-            <button type="button" onClick={() => setDirectInputTeam(directInputTeam === key ? null : key)} className="touch-button mt-3 w-full rounded-lg bg-slate-100 px-3 py-2 text-sm font-black text-slate-700">직접 입력</button>
-            {directInputTeam === key && <div className="mt-3 flex items-center gap-2 rounded-lg bg-slate-50 p-3"><input type="number" inputMode="numeric" min="0" max={INVESTMENT_BUDGET} step={INVESTMENT_STEP} value={investments[key] || 0} onChange={(event) => setAmount(key, event.target.value)} aria-label={`${team.teamName} 투자 금액 직접 입력`} className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-3 text-right font-black outline-none focus:border-indigo-500" /><span className="text-sm font-bold text-slate-500">원</span></div>}
+            <strong className="investment-current-amount">{formatInvestment(investments[key] || 0)}</strong>
+            <button type="button" onClick={() => { setDirectInputTeam(directInputTeam === key ? null : key); setDirectAmount(String(Number(investments[key] || 0) / 10000)); }} className="touch-button mt-3 w-full rounded-lg bg-slate-100 px-3 py-2 text-sm font-black text-slate-700">직접 입력</button>
+            {directInputTeam === key && <div className="mt-3 flex items-center gap-2 rounded-lg bg-slate-50 p-3"><input type="number" inputMode="numeric" min="0" max={INVESTMENT_BUDGET / 10000} step={INVESTMENT_STEP / 10000} value={directAmount} onChange={(event) => setDirectAmount(event.target.value)} aria-label={`${team.teamName} 투자 금액 직접 입력 (만 원)`} className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-3 text-right font-black outline-none focus:border-indigo-500" /><span className="text-sm font-bold text-slate-500">만 원</span><button type="button" className="rounded-lg bg-slate-900 p-3 text-white" onClick={() => { if (!Number.isFinite(Number(directAmount))) return; setAmount(key, Number(directAmount) * 10000); setDirectInputTeam(null); }}>적용</button></div>}
           </article>;
         })}
       </div>

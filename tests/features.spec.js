@@ -49,7 +49,7 @@ test("초안 자동저장과 진행 중 저장 이후 최종 제출의 순서를
   expect(await page.evaluate(() => window.writes.at(-1).ideaSubmitted)).toBe(false);
   await page.evaluate(() => { window.saveDelay = 1500; });
   await page.getByLabel("사업명").fill("저장 중 초안");
-  await expect(page.getByRole("status")).toHaveText("자동저장 중…");
+  await expect(page.getByRole("status")).toContainText("자동저장 중…");
   await page.getByLabel("사업명").fill("최종 제출 내용");
   await page.getByRole("button", { name: "제출", exact: true }).click();
   await expect.poll(() => page.evaluate(() => window.writes?.at(-1)?.ideaSubmitted), { timeout: 7000 }).toBe(true);
@@ -82,4 +82,15 @@ test("학생 세부 평가 새 창은 17개 근거와 총평을 안전하게 표
   await popup.setViewportSize({ width: 390, height: 844 });
   expect(await popup.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await popup.screenshot({ path: "test-results/student-evaluation-mobile.png", fullPage: true });
+});
+
+ test("오프라인 초안 보관 상태를 표시하고 연결 복구 후 서버 저장한다", async ({ page }) => {
+  await page.evaluate(() => { Object.defineProperty(navigator, 'onLine', { configurable: true, value: false }); window.dispatchEvent(new Event('offline')); });
+  await page.getByLabel("사업명").fill("연결 복구 초안");
+  await expect(page.getByRole("status")).toContainText("연결 끊김 · 이 기기에 초안 보관 중");
+  await page.evaluate(() => { Object.defineProperty(navigator, 'onLine', { configurable: true, value: true }); window.dispatchEvent(new Event('online')); });
+  await expect.poll(() => page.evaluate(() => window.writes?.at(-1)?.idea.serviceName)).toBe("연결 복구 초안");
+  await expect(page.getByRole("status")).toContainText("마지막 서버 저장");
+  await page.evaluate(() => { Object.defineProperty(navigator, 'onLine', { configurable: true, value: false }); window.dispatchEvent(new Event('offline')); });
+  await expect(page.getByRole("status")).toContainText("현재 내용은 서버에 저장되었습니다");
 });

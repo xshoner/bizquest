@@ -79,7 +79,7 @@ export function makeDefaultTeams() {
   }, {});
 }
 
-export function makeInitialRoom(roomId, roomTitle = "스타트업 히어로") {
+export function makeInitialRoom(roomId, roomTitle = "BIZQUEST") {
   const now = Date.now();
   return {
     roomId,
@@ -338,20 +338,20 @@ export function makePivotTeamPatch(team, scenario, month = 12) {
   const immediateRate = Number(scenario?.immediateRate || 0);
   const afterAsset = Math.round(beforeAsset * (1 + immediateRate / 100) + immediateAmount);
   const modifiers = { scenarioId: scenario?.id, appliedAtMonth: month };
-  if (scenario?.id === "government_support") modifiers.factorMultipliers = { F09: Number(scenario.primaryMultiplier || 1) };
+  if (scenario?.id === "government_support") modifiers.factorMultipliers = { F09: Number(scenario.primaryMultiplier ?? 1) };
   if (scenario?.id === "professional_management") modifiers.equityDilutionRate = Number(scenario.dilutionRate || 0);
-  if (scenario?.id === "downsizing" || scenario?.id === "aggressive_expansion") modifiers.eventRateMultiplier = Number(scenario.primaryMultiplier || 1);
+  if (scenario?.id === "downsizing" || scenario?.id === "aggressive_expansion") modifiers.eventRateMultiplier = Number(scenario.primaryMultiplier ?? 1);
   if (scenario?.id === "early_exit") modifiers.frozenAfterMonth = month;
-  if (scenario?.id === "global_expansion") modifiers.factorMultipliers = { F01: Number(scenario.primaryMultiplier || 1), F04: Number(scenario.primaryMultiplier || 1), F11: Number(scenario.secondaryMultiplier || 1) };
+  if (scenario?.id === "global_expansion") modifiers.factorMultipliers = { F01: Number(scenario.primaryMultiplier ?? 1), F04: Number(scenario.primaryMultiplier ?? 1), F11: Number(scenario.secondaryMultiplier ?? 1) };
   if (scenario?.id === "ip_protection") {
     modifiers.factorOverrides = { F14: "양호" };
-    modifiers.negativeEventMultipliers = { E05: Number(scenario.primaryMultiplier || 1), E19: Number(scenario.primaryMultiplier || 1) };
+    modifiers.negativeEventMultipliers = { E05: Number(scenario.primaryMultiplier ?? 1), E19: Number(scenario.primaryMultiplier ?? 1) };
   }
   if (scenario?.id === "cofounder_reset") {
-    modifiers.negativeEventMultipliers = { E16: Number(scenario.primaryMultiplier || 1), E20: Number(scenario.primaryMultiplier || 1) };
-    modifiers.goodPositiveMultiplier = Number(scenario.secondaryMultiplier || 1);
+    modifiers.negativeEventMultipliers = { E16: Number(scenario.primaryMultiplier ?? 1), E20: Number(scenario.primaryMultiplier ?? 1) };
+    modifiers.goodPositiveMultiplier = Number(scenario.secondaryMultiplier ?? 1);
   }
-  if (scenario?.id === "crowdfunding") modifiers.factorMultipliers = { F02: Number(scenario.primaryMultiplier || 1), F07: Number(scenario.primaryMultiplier || 1), F11: Number(scenario.primaryMultiplier || 1) };
+  if (scenario?.id === "crowdfunding") modifiers.factorMultipliers = { F02: Number(scenario.primaryMultiplier ?? 1), F07: Number(scenario.primaryMultiplier ?? 1), F11: Number(scenario.primaryMultiplier ?? 1) };
   if (scenario?.id === "turnaround") {
     const factors = team.aiEvaluation?.factors || {};
     const target = Object.keys(factors).find((key) => factors[key]?.grade === "취약") || Object.keys(factors).find((key) => factors[key]?.grade === "보통");
@@ -370,10 +370,10 @@ export function applyRiskMultiplier(team, event, simulationSettings = {}, month 
   rate *= Number(settings.eventMultipliers?.[event.id]?.[rate >= 0 ? "positive" : "negative"] ?? 1);
   rate *= Number(settings.factorGradeMultipliers?.[event.factor]?.[grade] ?? 1);
   if (month > 12) {
-    rate *= Number(modifiers.eventRateMultiplier || 1);
-    rate *= Number(modifiers.factorMultipliers?.[event.factor] || 1);
-    if (rate < 0) rate *= Number(modifiers.negativeEventMultipliers?.[event.id] || 1);
-    if (rate > 0 && grade === "양호") rate *= Number(modifiers.goodPositiveMultiplier || 1);
+    rate *= Number(modifiers.eventRateMultiplier ?? 1);
+    rate *= Number(modifiers.factorMultipliers?.[event.factor] ?? 1);
+    if (rate < 0) rate *= Number(modifiers.negativeEventMultipliers?.[event.id] ?? 1);
+    if (rate > 0 && grade === "양호") rate *= Number(modifiers.goodPositiveMultiplier ?? 1);
     if (Number(modifiers.frozenAfterMonth || 0) > 0) rate = 0;
   }
   // Global assessments modify each team's event rate throughout all 24 months.

@@ -101,3 +101,16 @@ test("새 팩터는 팀별로 적용되며 피벗 배율과 청산을 유지한�
   assert.equal(applyRiskMultiplier(baseTeam, event, {}, 13).lastEventImpact.rate, 10);
   assert.equal(applyRiskMultiplier({ ...team, pivotModifiers: { frozenAfterMonth: 12 } }, event, {}, 13).lastEventImpact.rate, 0);
 });
+
+ test("피벗의 0배는 13개월 이후 상승·하락 모두에 적용되고 12개월에는 적용되지 않는다", () => {
+  for (const grade of ["양호", "취약"]) {
+    const event = SIMULATION_EVENTS.find((e) => e.factor === "F09");
+    const team = { ...baseTeam, aiEvaluation: { factors: { F09: { grade } } } };
+    const scenario = { ...PIVOT_SCENARIOS.find((s) => s.id === "government_support"), primaryMultiplier: 0 };
+    const patched = { ...team, ...makePivotTeamPatch(team, scenario) };
+    assert.equal(applyRiskMultiplier(patched, event, {}, 13).lastEventImpact.rate, 0);
+    assert.notEqual(applyRiskMultiplier(patched, event, {}, 12).lastEventImpact.rate, 0);
+    const downsized = { ...team, ...makePivotTeamPatch(team, { ...PIVOT_SCENARIOS.find((s) => s.id === "downsizing"), primaryMultiplier: 0 }) };
+    assert.equal(applyRiskMultiplier(downsized, event, {}, 13).lastEventImpact.rate, 0);
+  }
+});

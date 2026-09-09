@@ -1,3 +1,4 @@
+import RouteErrorBoundary from "./components/shared/RouteErrorBoundary.jsx";
 import React, { Suspense, lazy } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
@@ -11,7 +12,7 @@ const StudentPage = lazy(() => import("./pages/StudentPage.jsx"));
 createRoot(document.getElementById("root")).render(
   <React.StrictMode>
     <BrowserRouter>
-      <Suspense fallback={<div className="p-8 text-sm font-bold text-slate-500">화면을 불러오는 중입니다.</div>}>
+      <RouteErrorBoundary><Suspense fallback={<div className="p-8 text-sm font-bold text-slate-500">화면을 불러오는 중입니다.</div>}>
         <Routes>
           <Route element={<AppShell />}>
             <Route index element={<AdminPage />} />
@@ -21,7 +22,7 @@ createRoot(document.getElementById("root")).render(
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>
-      </Suspense>
+      </Suspense></RouteErrorBoundary>
     </BrowserRouter>
   </React.StrictMode>
 );

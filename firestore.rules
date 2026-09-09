@@ -31,20 +31,44 @@ service cloud.firestore {
       return signedIn() && !isAnonymous();
     }
 
+    function isPlatformAdmin() {
+      return isTeacher() && exists(/databases/$(database)/documents/platformAdmins/$(request.auth.uid))
+        && get(/databases/$(database)/documents/platformAdmins/$(request.auth.uid)).data.enabled == true;
+    }
+
+    match /platformAdmins/{uid} {
+      allow get: if isOwner(uid);
+      allow list, write: if false;
+    }
+
+    match /roomCodes/{roomId} {
+      allow get: if signedIn();
+      allow list: if false;
+      allow create, update: if isTeacher()
+        && request.resource.data.keys().hasOnly(['ownerUid', 'roomId'])
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.roomId == roomId
+        && (!exists(/databases/$(database)/documents/roomCodes/$(roomId)) || resource.data.ownerUid == request.auth.uid)
+        && existsAfter(/databases/$(database)/documents/users/$(request.auth.uid)/rooms/$(roomId));
+      allow delete: if isTeacher() && resource.data.ownerUid == request.auth.uid;
+    }
+
     function isOwner(uid) {
       return signedIn() && request.auth.uid == uid;
     }
 
     // ------------------------------------------------------------------ app-wide documents
     match /appSettings/{settingId} {
-      allow read, write: if isTeacher();
+      allow read: if isTeacher();
+      allow write: if isPlatformAdmin();
     }
 
     match /teacherRegistry/{teacherUid} {
-      allow read: if isTeacher();
+      allow get: if isOwner(teacherUid) || isPlatformAdmin();
+      allow list: if isPlatformAdmin();
       allow create, update: if isTeacher()
-        && (request.auth.uid == teacherUid || request.resource.data.createdBy == request.auth.uid);
-      allow delete: if isTeacher();
+        && (request.auth.uid == teacherUid || isPlatformAdmin());
+      allow delete: if isPlatformAdmin();
     }
 
     // ------------------------------------------------------------------ teacher-owned data

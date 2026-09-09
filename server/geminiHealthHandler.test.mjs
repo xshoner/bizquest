@@ -10,7 +10,7 @@ const studentToken = `${encode({ alg: "RS256" })}.${encode({ sub: "student", aud
 test("Gemini 상태 점검은 두 키를 각각 최소 토큰으로 호출한다", async () => {
   const calls = [];
   const fetchImpl = async (url, init = {}) => {
-    if (String(url).startsWith("https://firestore.googleapis.com/")) return new Response("{}", { status: 200 });
+    if (String(url).startsWith("https://firestore.googleapis.com/")) return new Response(JSON.stringify({ fields: { enabled: { booleanValue: true } } }), { status: 200 });
     const requestBody = JSON.parse(init.body);
     calls.push({ key: init.headers["x-goog-api-key"], requestBody });
     const status = init.headers["x-goog-api-key"] === "primary-key" ? 200 : 429;
@@ -35,7 +35,7 @@ test("Gemini 상태 점검은 두 키를 각각 최소 토큰으로 호출한다
 
 test("Gemini 상태 점검은 미설정 키를 노출 없이 이상으로 표시한다", async () => {
   const fetchImpl = async (url) => {
-    if (String(url).startsWith("https://firestore.googleapis.com/")) return new Response("{}", { status: 200 });
+    if (String(url).startsWith("https://firestore.googleapis.com/")) return new Response(JSON.stringify({ fields: { enabled: { booleanValue: true } } }), { status: 200 });
     return new Response("ok", { status: 200 });
   };
   const response = await handleGeminiHealthRequest({
@@ -60,4 +60,12 @@ test("익명 사용자는 Gemini 키 상태를 점검할 수 없다", async () =
   });
   assert.equal(response.status, 401);
   assert.equal(called, false);
+});
+
+ test("일반 교사는 운영자 문서가 없거나 비활성화되어 있으면 키 점검을 실행할 수 없다", async () => {
+  for (const status of [200, 403, 404]) {
+    let calls = 0;
+    const result = await handleGeminiHealthRequest({ method: "POST", authorization: `Bearer ${teacherToken}`, env: {}, fetchImpl: async (url) => { calls++; assert.match(url, /platformAdmins\/teacher/); return new Response(JSON.stringify({ fields: { enabled: { booleanValue: false } } }), { status }); } });
+    assert.equal(result.status, 401); assert.equal(calls, 1);
+  }
 });
