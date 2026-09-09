@@ -72,6 +72,10 @@ test("학생 세부 평가 새 창은 17개 근거와 총평을 안전하게 표
   const popup = await popupPromise;
   await expect(popup.locator("article")).toHaveCount(17);
   await expect(popup.locator("body")).toContainText("F17 구현 방식을 검토할 필요가 있다.");
+  for (const id of ["F16", "F17"]) {
+    const detail = popup.locator("article").filter({ has: popup.locator("h2", { hasText: id }) });
+    await expect(detail).not.toContainText(/양호|보통|취약|가산|방어/);
+  }
   await expect(popup.locator("body")).toContainText("강점과 보완점을 확인하세요.");
   await expect(popup.locator("script")).toHaveCount(0);
   expect(await popup.evaluate(() => window.opener)).toBeNull();

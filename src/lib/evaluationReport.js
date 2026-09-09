@@ -22,9 +22,8 @@ export function openEvaluationReport(team) {
   for (const factor of BUSINESS_FACTORS) {
     const result = getEvaluationFactor(team, factor.id);
     const article = append(doc.body, "article", "");
-    append(article, "h2", `${factor.id} ${factor.name} · ${result?.grade || "미평가"}`);
+    append(article, "h2", `${factor.id} ${factor.name}${factor.effect ? "" : ` · ${result?.grade || "미평가"}`}`);
     append(article, "p", result?.reason || "이 팩터의 평가 결과가 없습니다. 관리자에게 재평가를 요청하세요.");
-    if (factor.effect) append(article, "p", factor.effect);
   }
   const close = append(doc.body, "button", "창 닫기");
   close.onclick = () => popup.close();

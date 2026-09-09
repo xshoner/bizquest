@@ -6,6 +6,7 @@ import { createManagedTeacher, readLocalTeacherRegistry, useTeacherAuth } from "
 import { deleteRoomDeep } from "../lib/roomStore.js";
 import { APP_SETTINGS_PATH, DEFAULT_APP_SETTINGS, LOCAL_APP_SETTINGS_KEY, mergeAppSettings, useAppSettings } from "../lib/appSettings.js";
 import { BUSINESS_FACTORS, SIMULATION_EVENTS } from "../data/gameData.js";
+import { mergeSimulationSettings } from "../data/simulationSettings.js";
 
 function uniqueUsers(items) {
   const map = new Map();
@@ -121,14 +122,21 @@ export default function SettingsPage() {
     }));
   }
 
+  function updateEventRate(eventId, grade, value) {
+    setForm((current) => ({ ...current, simulation: { ...current.simulation,
+      eventRates: { ...current.simulation.eventRates, [eventId]: { ...current.simulation.eventRates[eventId], [grade]: Number(value) } }
+    } }));
+  }
+
   function updateFactorMultiplier(factorId, grade, value) {
+    const field = ["F16", "F17"].includes(factorId) ? "globalFactorMultipliers" : "factorGradeMultipliers";
     setForm((current) => ({
       ...current,
       simulation: {
         ...current.simulation,
-        factorGradeMultipliers: {
-          ...current.simulation.factorGradeMultipliers,
-          [factorId]: { ...current.simulation.factorGradeMultipliers[factorId], [grade]: Number(value) }
+        [field]: {
+          ...current.simulation[field],
+          [factorId]: { ...current.simulation[field][factorId], [grade]: Number(value) }
         }
       }
     }));
@@ -138,6 +146,13 @@ export default function SettingsPage() {
     setBusy(true);
     setStatus("");
     try {
+      for (const field of ["eventRates", "eventMultipliers", "factorGradeMultipliers", "globalFactorMultipliers"]) {
+        for (const grades of Object.values(form.simulation[field])) {
+          if (Object.values(grades).some((value) => !Number.isFinite(value) || (field !== "eventRates" && value < 0))) {
+            throw new Error("변동률과 배율에 유효한 숫자를 입력하세요. 배율은 0 이상이어야 합니다.");
+          }
+        }
+      }
       const nextPasscode = String(form.adminPasscode || "").trim();
       if (nextPasscode.length < 6) throw new Error("관리자 패스코드는 6자리 이상으로 설정하세요.");
       if (!settings.adminPasscodeChangedAt && nextPasscode === String(settings.adminPasscode || "")) {
@@ -432,12 +447,14 @@ export default function SettingsPage() {
 
         <section className="settings-panel settings-panel-wide">
           <h2><Settings size={20} /> 이벤트 카드 ± 배율</h2>
-          <p className="settings-help">각 경영 이벤트의 상승과 하락 강도를 별도로 조정합니다.</p>
-          <div className="settings-rate-table">
-            <div className="settings-rate-head"><b>카드</b><b>+ 배율</b><b>- 배율</b></div>
+          <button type="button" className="text-sm font-bold text-indigo-600" onClick={() => setForm((current) => ({ ...current, simulation: { ...current.simulation, eventRates: mergeSimulationSettings().eventRates, eventMultipliers: mergeSimulationSettings().eventMultipliers } }))}>이벤트 코드 기본값으로 복원</button>
+          <p className="settings-help">코드에 정의된 등급별 기본 변동률(%)과 상승·하락 추가 배율을 표시합니다. 기본 변동률 × 이벤트 ± 배율 × 팩터 등급 배율로 계산합니다.</p>
+          <div className="settings-rate-table settings-event-values">
+            <div className="settings-rate-head"><b>카드</b><b>양호 (%)</b><b>보통 (%)</b><b>취약 (%)</b><b>+ 배율</b><b>- 배율</b></div>
             {SIMULATION_EVENTS.map((event) => (
               <div key={event.id} className="settings-rate-row">
                 <span><b>{event.id}</b> {event.title}</span>
+                {["양호", "보통", "취약"].map((grade) => <input key={grade} aria-label={`${event.id} ${grade} 기본 변동률`} type="number" step="0.1" value={form.simulation.eventRates[event.id][grade]} onChange={(e) => updateEventRate(event.id, grade, e.target.value)} />)}
                 <input aria-label={`${event.id} 상승 배율`} type="number" min="0" step="0.1" value={form.simulation.eventMultipliers[event.id]?.positive ?? 1} onChange={(e) => updateEventMultiplier(event.id, "positive", e.target.value)} />
                 <input aria-label={`${event.id} 하락 배율`} type="number" min="0" step="0.1" value={form.simulation.eventMultipliers[event.id]?.negative ?? 1} onChange={(e) => updateEventMultiplier(event.id, "negative", e.target.value)} />
               </div>
@@ -447,14 +464,15 @@ export default function SettingsPage() {
 
         <section className="settings-panel settings-panel-wide">
           <h2><Settings size={20} /> AI 평가 팩터별 등급 배율</h2>
-          {BUSINESS_FACTORS.filter((factor) => factor.effect).map((factor) => <p key={factor.id} className="settings-help"><b>{factor.id} {factor.name}</b> — {factor.effect}. 모든 이벤트에 고정 비율로 적용됩니다.</p>)}
-          <p className="settings-help">F01~F15 각 평가 항목의 양호·보통·취약 결과가 경영 시뮬레이션에 반영되는 강도를 조정합니다.</p>
+          <button type="button" className="text-sm font-bold text-indigo-600" onClick={() => setForm((current) => ({ ...current, simulation: { ...current.simulation, factorGradeMultipliers: mergeSimulationSettings().factorGradeMultipliers, globalFactorMultipliers: mergeSimulationSettings().globalFactorMultipliers } }))}>팩터 코드 기본값으로 복원</button>
+
+          <p className="settings-help">F01~F15의 기본 추가 배율은 1배입니다. F16은 양호·보통일 때 상승, 취약일 때 하락에 적용됩니다. F17은 모든 하락에 적용됩니다. 1.05배는 5% 가산, 0.95배는 5% 방어입니다. 저장된 설정은 다음 시뮬레이션 시작 시 적용됩니다.</p>
           <div className="settings-rate-table settings-factor-table">
             <div className="settings-rate-head"><b>팩터</b><b>양호</b><b>보통</b><b>취약</b></div>
-            {BUSINESS_FACTORS.filter((factor) => !factor.effect).map((factor) => (
+            {BUSINESS_FACTORS.map((factor) => (
               <div key={factor.id} className="settings-rate-row">
                 <span><b>{factor.id}</b> {factor.name}</span>
-                {["양호", "보통", "취약"].map((grade) => <input key={grade} aria-label={`${factor.id} ${grade} 배율`} type="number" min="0" step="0.1" value={form.simulation.factorGradeMultipliers[factor.id]?.[grade] ?? 1} onChange={(e) => updateFactorMultiplier(factor.id, grade, e.target.value)} />)}
+                {["양호", "보통", "취약"].map((grade) => <input key={grade} aria-label={`${factor.id} ${grade} 배율`} type="number" min="0" step="0.001" value={(factor.effect ? form.simulation.globalFactorMultipliers : form.simulation.factorGradeMultipliers)[factor.id]?.[grade] ?? 1} onChange={(e) => updateFactorMultiplier(factor.id, grade, e.target.value)} />)}
               </div>
             ))}
           </div>

@@ -2036,8 +2036,8 @@ function AiOpinionModal({ team, onClose }) {
             const item = getEvaluationFactor(team, factor.id);
             return (
               <div key={factor.id} className="rounded-lg border border-slate-200 p-3 text-sm">
-                <div className="flex items-center justify-between gap-2"><b>{factor.name}</b><span className={`rounded-full px-3 py-1 text-xs font-black ${gradeClassName(item?.grade || "보통")}`}>{item?.grade || "보통"}</span></div>
-                <p className="mt-1 text-slate-600">{item?.reason || factor.description}</p>{factor.effect && <p className="mt-2 text-xs font-bold text-indigo-600">{factor.effect}</p>}
+                <div className="flex items-center justify-between gap-2"><b>{factor.name}</b>{!factor.effect && <span className={`rounded-full px-3 py-1 text-xs font-black ${gradeClassName(item?.grade || "보통")}`}>{item?.grade || "보통"}</span>}</div>
+                <p className="mt-1 text-slate-600">{item?.reason || factor.description}</p>
               </div>
             );
           })}

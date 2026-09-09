@@ -6797,3 +6797,10 @@ select {
   .admin-ai-summary-actions { grid-template-columns: 68px 76px; }
   .student-ai-grade-list { grid-template-columns: 1fr; }
 }
+
+/* Keep event base percentages and sign multipliers aligned on narrow screens. */
+.settings-event-values { overflow-x: auto; }
+.settings-event-values .settings-rate-head, .settings-event-values .settings-rate-row {
+  grid-template-columns: minmax(220px, 1fr) repeat(5, 90px);
+  min-width: 740px;
+}

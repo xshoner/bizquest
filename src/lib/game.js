@@ -366,9 +366,9 @@ export function applyRiskMultiplier(team, event, simulationSettings = {}, month 
   const modifiers = team.pivotModifiers || {};
   const baseGrade = team.aiEvaluation?.factors?.[event.factor]?.grade || "보통";
   const grade = modifiers.factorOverrides?.[event.factor] || baseGrade;
-  let rate = Number(event.rates?.[grade] ?? 0);
-  rate *= Number(settings.eventMultipliers?.[event.id]?.[rate >= 0 ? "positive" : "negative"] || 1);
-  rate *= Number(settings.factorGradeMultipliers?.[event.factor]?.[grade] || 1);
+  let rate = Number(simulationSettings.eventRates?.[event.id]?.[grade] ?? event.rates?.[grade] ?? 0);
+  rate *= Number(settings.eventMultipliers?.[event.id]?.[rate >= 0 ? "positive" : "negative"] ?? 1);
+  rate *= Number(settings.factorGradeMultipliers?.[event.factor]?.[grade] ?? 1);
   if (month > 12) {
     rate *= Number(modifiers.eventRateMultiplier || 1);
     rate *= Number(modifiers.factorMultipliers?.[event.factor] || 1);
@@ -381,12 +381,13 @@ export function applyRiskMultiplier(team, event, simulationSettings = {}, month 
   const assessmentGrade = (id) => (month > 12 ? modifiers.factorOverrides?.[id] : null) || team.aiEvaluation?.factors?.[id]?.grade;
   const feasibility = assessmentGrade("F16");
   const duplication = assessmentGrade("F17");
-  if (rate > 0) rate *= feasibility === "양호" ? 1.05 : feasibility === "보통" ? 1.015 : 1;
+  const globalMultiplier = (id, grade) => Number(settings.globalFactorMultipliers[id]?.[grade] ?? 1);
+  if (rate > 0 && ["양호", "보통"].includes(feasibility)) rate *= globalMultiplier("F16", feasibility);
   if (rate < 0) {
-    const extraLoss = (feasibility === "취약" ? 0.035 : 0) + (duplication === "취약" ? 0.037 : duplication === "양호" ? -0.05 : duplication === "보통" ? -0.025 : 0);
-    rate *= 1 + extraLoss;
+    const extraLoss = (feasibility === "취약" ? globalMultiplier("F16", feasibility) - 1 : 0) + globalMultiplier("F17", duplication) - 1;
+    rate *= Math.max(0, 1 + extraLoss);
   }
-  rate = Math.round(rate * 100) / 100;
+  rate = Math.round(rate * 100) / 100 || 0;
   const beforeAsset = Number(team.currentAsset || 0);
   const afterAsset = Math.round(beforeAsset * (1 + rate / 100));
 

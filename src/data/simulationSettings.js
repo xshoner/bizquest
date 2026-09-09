@@ -15,6 +15,11 @@ export const PIVOT_SCENARIOS = [
 
 export const DEFAULT_SIMULATION_SETTINGS = {
   pivotScenarios: PIVOT_SCENARIOS,
+  eventRates: Object.fromEntries(SIMULATION_EVENTS.map((event) => [event.id, { ...event.rates }])),
+  globalFactorMultipliers: {
+    F16: { 양호: 1.05, 보통: 1.015, 취약: 1.035 },
+    F17: { 양호: 0.95, 보통: 0.975, 취약: 1.037 }
+  },
   eventMultipliers: Object.fromEntries(SIMULATION_EVENTS.map((event) => [event.id, { positive: 1, negative: 1 }])),
   factorGradeMultipliers: Object.fromEntries(BUSINESS_FACTORS.map((factor) => [factor.id, { "양호": 1, "보통": 1, "취약": 1 }]))
 };
@@ -22,6 +27,12 @@ export const DEFAULT_SIMULATION_SETTINGS = {
 export function mergeSimulationSettings(settings = {}) {
   const incomingScenarios = new Map((settings.pivotScenarios || []).map((scenario) => [scenario.id, scenario]));
   return {
+    eventRates: Object.fromEntries(SIMULATION_EVENTS.map((event) => [event.id, {
+      ...event.rates, ...(settings.eventRates?.[event.id] || {})
+    }])),
+    globalFactorMultipliers: Object.fromEntries(Object.entries(DEFAULT_SIMULATION_SETTINGS.globalFactorMultipliers).map(([id, grades]) => [id, {
+      ...grades, ...(settings.globalFactorMultipliers?.[id] || {})
+    }])),
     pivotScenarios: PIVOT_SCENARIOS.map((scenario) => ({ ...scenario, ...(incomingScenarios.get(scenario.id) || {}) })),
     eventMultipliers: Object.fromEntries(SIMULATION_EVENTS.map((event) => [event.id, {
       ...DEFAULT_SIMULATION_SETTINGS.eventMultipliers[event.id],

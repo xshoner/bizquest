@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { calculateInvestmentPortfolio, getAssetChange, makePivotTeamPatch, rankInvestors, resolvePivotVote, applyRiskMultiplier } from "./game.js";
-import { PIVOT_SCENARIOS } from "../data/simulationSettings.js";
+import { PIVOT_SCENARIOS, mergeSimulationSettings } from "../data/simulationSettings.js";
 import { SIMULATION_EVENTS } from "../data/gameData.js";
 
 const baseTeam = {
@@ -12,6 +12,27 @@ const baseTeam = {
   aiEvaluation: { factors: { F01: { grade: "보통" }, F09: { grade: "취약" }, F14: { grade: "취약" } } },
   assetHistory: [{ month: 0, asset: 100_000_000 }, { month: 12, asset: 120_000_000 }]
 };
+
+test("설정 기본값은 기존 코드의 이벤트 변동률과 전역 팩터 배율을 유지한다", () => {
+  const settings = mergeSimulationSettings({ factorGradeMultipliers: { F16: { 양호: 1 } } });
+  assert.deepEqual(settings.eventRates.E01, { 양호: 3, 보통: -5, 취약: -12 });
+  assert.deepEqual(settings.globalFactorMultipliers.F16, { 양호: 1.05, 보통: 1.015, 취약: 1.035 });
+  assert.deepEqual(settings.globalFactorMultipliers.F17, { 양호: 0.95, 보통: 0.975, 취약: 1.037 });
+});
+
+test("관리자가 저장한 기본 변동률, 배율과 0배가 실제 계산에 반영된다", () => {
+  const event = SIMULATION_EVENTS[0];
+  const team = { ...baseTeam, aiEvaluation: { factors: { F01: { grade: "보통" }, F16: { grade: "보통" }, F17: { grade: "양호" } } } };
+  const settings = mergeSimulationSettings({ eventRates: { E01: { 보통: 10 } }, eventMultipliers: { E01: { positive: 2 } }, factorGradeMultipliers: { F01: { 보통: 1.5 } }, globalFactorMultipliers: { F16: { 보통: 1.1 }, F17: { 양호: 0.8 } } });
+  assert.equal(applyRiskMultiplier(team, event, settings, 1).lastEventImpact.rate, 33);
+  settings.eventRates.E01.보통 = -10;
+  assert.equal(applyRiskMultiplier(team, event, settings, 24).lastEventImpact.rate, -12);
+  settings.eventMultipliers.E01.negative = 0;
+  assert.equal(applyRiskMultiplier(team, event, settings, 1).lastEventImpact.rate, 0);
+  settings.eventMultipliers.E01.negative = 1;
+  settings.factorGradeMultipliers.F01.보통 = 0;
+  assert.equal(applyRiskMultiplier(team, event, settings, 1).lastEventImpact.rate, 0);
+});
 
 test("투자 포트폴리오는 미투자 현금과 기업 수익률을 함께 반영한다", () => {
   const student = { uid: "u1", nickname: "투자왕", team: "B", investmentSubmitted: true, investments: { A: 25_000_000 } };
