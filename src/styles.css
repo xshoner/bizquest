@@ -6799,6 +6799,15 @@ select {
 }
 
 /* Keep event base percentages and sign multipliers aligned on narrow screens. */
+.landing-nav .bizquest-brand { gap: 10px; text-decoration: none; }
+.landing-nav .bizquest-name { font-size: 27px; line-height: 1; letter-spacing: -0.03em; }
+.landing-nav .bizquest-tagline { margin-top: 4px; font-size: 10px; }
+@media (max-width: 640px) {
+  .landing-nav .bizquest-logo-image { width: 40px; height: 40px; }
+  .landing-nav .bizquest-name { font-size: 22px; }
+  .landing-nav .bizquest-tagline { display: none; }
+}
+
 .settings-event-values { overflow-x: auto; }
 .settings-event-values .settings-rate-head, .settings-event-values .settings-rate-row {
   grid-template-columns: minmax(220px, 1fr) repeat(5, 90px);

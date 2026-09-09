@@ -76,6 +76,7 @@ import { useAppSettings } from "../lib/appSettings.js";
 import { roomDocRef, useRoom } from "../hooks/useRoom.js";
 import { loginTeacher, logoutTeacher, registerTeacher, useTeacherAuth } from "../hooks/useTeacherAuth.js";
 import { useAdminBgm } from "../hooks/useAdminBgm.js";
+import bizQuestLogo from "../images/bizquest-logo.png";
 
 import heroBackgroundImage from "../images/landing-hero-ai-v2.webp";
 import processRoadmapImage from "../images/landing-process-roadmap.webp";
@@ -101,6 +102,16 @@ const AI_HEARTBEAT_INTERVAL = 5000;
 function makeAdminSessionId() {
   if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
   return `admin-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function BizQuestBrand() {
+  return <>
+    <img className="bizquest-logo-image" src={bizQuestLogo} alt="" />
+    <span>
+      <span className="bizquest-name"><b>BIZ</b>QUEST</span>
+      <span className="bizquest-tagline">아이디어를 창업으로, 가능성을 현실로</span>
+    </span>
+  </>;
 }
 
 function formatSavedAt(value) {
@@ -209,9 +220,8 @@ function LandingPage({ appSettings, roomTitle, setRoomTitle, joinCode, setJoinCo
   return (
     <section className="landing-page">
       <nav className="landing-nav">
-        <a href="#top" className="landing-logo" aria-label="BizQuest home">
-          <span><Rocket size={24} /></span>
-          <strong>{landing.brandName}</strong>
+        <a href="#top" className="bizquest-brand" aria-label="BizQuest home">
+          <BizQuestBrand />
         </a>
         <div className="landing-nav-actions">
           {landing.featureButtons.map((label, index) => (
@@ -1566,9 +1576,8 @@ export default function AdminPage() {
   return (
     <section className="admin-dashboard mx-auto max-w-7xl px-5 py-6">
       <header className="admin-topbar">
-        <Link to="/" className="landing-logo" aria-label="BizQuest 메인으로 이동">
-          <span><Rocket size={24} /></span>
-          <strong>{appSettings.landing?.brandName || "BizQuest"}</strong>
+        <Link to="/" className="bizquest-brand" aria-label="BizQuest 메인으로 이동">
+          <BizQuestBrand />
         </Link>
         <div className="admin-room-meta">
           <span><FileText size={22} /><b>방 제목</b>{room.roomTitle}</span>
