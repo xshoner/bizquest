@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
 import {
   ArrowRight,
+  ArrowUpRight,
   Award,
   BarChart3,
   Building2,
@@ -78,8 +79,8 @@ import { loginTeacher, logoutTeacher, registerTeacher, useTeacherAuth } from "..
 import { useAdminBgm } from "../hooks/useAdminBgm.js";
 import bizQuestLogo from "../images/bizquest-logo.png";
 
-import heroBackgroundImage from "../images/landing-hero-ai-v2.webp";
-import processRoadmapImage from "../images/landing-process-roadmap.webp";
+import "../landing.css";
+
 import { AiEvaluationShowcase, EventCardVisual, FanfareOnResult, ResultFinalizingShowcase, ResultFireworks } from "../components/shared/Effects.jsx";
 import { AssetChangeSummary, AssetTrendChart, gradeClassName } from "../components/shared/AssetCharts.jsx";
 import { installAudioUnlock, playPhaseTransition, playPivotTransition, playSimulationFinale, playWhoosh } from "../lib/audio.js";
@@ -217,9 +218,18 @@ function LandingPage({ appSettings, roomTitle, setRoomTitle, joinCode, setJoinCo
   const useCaseIcons = [GraduationCap, Rocket, Building2];
   const flowIcons = [Users, Award, LineChart, Lightbulb, ClipboardCheck, PieChart, Cpu, Trophy];
 
+  function navigateStartTabs(event) {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const next = event.key === "Home" ? "teacher" : event.key === "End" ? "student" : quickStartTab === "teacher" ? "student" : "teacher";
+    setQuickStartTab(next);
+    event.currentTarget.querySelector(`#${next}-start-tab`)?.focus();
+  }
+
   return (
     <section className="landing-page">
-      <nav className="landing-nav">
+      <a className="landing-skip-link" href="#quick-start">수업 시작으로 바로가기</a>
+      <nav className="landing-nav" aria-label="메인 메뉴">
         <a href="#top" className="bizquest-brand" aria-label="BizQuest home">
           <BizQuestBrand />
         </a>
@@ -242,31 +252,34 @@ function LandingPage({ appSettings, roomTitle, setRoomTitle, joinCode, setJoinCo
         </div>
       </nav>
 
-      <header id="top" className="landing-hero" style={{ "--landing-hero-image": `url(${heroBackgroundImage})` }}>
+      <header id="top" className="landing-hero">
         <div className="landing-hero-copy">
-          <p className="landing-kicker"><Sparkles size={17} /> {landing.heroBadge}</p>
+          <p className="landing-kicker"><span aria-hidden="true" /> {landing.heroBadge}</p>
           <h1>{landing.heroTitle}</h1>
           <p className="landing-lead">{landing.heroDescription}</p>
           <div className="landing-hero-buttons">
-            <a href="#quick-start" className="landing-primary-button"><Rocket size={18} /> {landing.startLink}</a>
-            <a href="#class-flow" className="landing-secondary-button"><ArrowRight size={18} /> {landing.flowLink}</a>
+            <a href="#quick-start" className="landing-primary-button">{landing.startLink} <ArrowUpRight size={19} /></a>
+            <a href="#class-flow" className="landing-secondary-button"><Play size={16} /> {landing.flowLink}</a>
           </div>
           <div className="landing-stat-row">
             {landing.statItems.map((item) => (
-              <span key={item.title}><b>{item.description}</b>{item.title}</span>
+              <div key={item.title}><span><ArrowUpRight size={15} />{item.title}</span><b>{item.description}</b></div>
             ))}
           </div>
         </div>
 
-        <div id="quick-start" className="landing-quick-start">
+        <div id="quick-start" className="landing-quick-start" tabIndex={-1}>
           <div className="landing-section-title">
             <p>{landing.sectionEyebrow}</p>
             <h2>{landing.sectionTitle}</h2>
           </div>
-          <div className="landing-start-tabs" role="tablist" aria-label="빠른 시작 유형">
+          <div className="landing-start-tabs" role="tablist" aria-label="빠른 시작 유형" onKeyDown={navigateStartTabs}>
             <button
               type="button"
               role="tab"
+              id="teacher-start-tab"
+              aria-controls="teacher-start-panel"
+              tabIndex={quickStartTab === "teacher" ? 0 : -1}
               aria-selected={quickStartTab === "teacher"}
               className={quickStartTab === "teacher" ? "landing-start-tab landing-start-tab-active" : "landing-start-tab"}
               onClick={() => setQuickStartTab("teacher")}
@@ -277,6 +290,9 @@ function LandingPage({ appSettings, roomTitle, setRoomTitle, joinCode, setJoinCo
             <button
               type="button"
               role="tab"
+              id="student-start-tab"
+              aria-controls="student-start-panel"
+              tabIndex={quickStartTab === "student" ? 0 : -1}
               aria-selected={quickStartTab === "student"}
               className={quickStartTab === "student" ? "landing-start-tab landing-start-tab-active" : "landing-start-tab"}
               onClick={() => setQuickStartTab("student")}
@@ -287,7 +303,7 @@ function LandingPage({ appSettings, roomTitle, setRoomTitle, joinCode, setJoinCo
           </div>
           <div className="landing-start-grid">
             {quickStartTab === "teacher" && (
-            <section className="landing-start-card landing-start-card-primary">
+            <form id="teacher-start-panel" role="tabpanel" aria-labelledby="teacher-start-tab" className="landing-start-card landing-start-card-primary" onSubmit={(event) => { event.preventDefault(); createRoom(); }}>
               <div className="landing-start-head">
                 <ShieldCheck size={32} />
                 <div>
@@ -295,18 +311,18 @@ function LandingPage({ appSettings, roomTitle, setRoomTitle, joinCode, setJoinCo
                   <p>{landing.teacherDescription}</p>
                 </div>
               </div>
-              <label>{landing.roomTitleLabel}</label>
-              <input value={roomTitle} onChange={(event) => setRoomTitle(event.target.value)} />
+              <label htmlFor="landing-room-title">{landing.roomTitleLabel}</label>
+              <input id="landing-room-title" value={roomTitle} onChange={(event) => setRoomTitle(event.target.value)} />
               {actionError && <p className="landing-error">{actionError}</p>}
-              <button disabled={creating} onClick={createRoom} className="landing-action-button">
+              <button type="submit" disabled={creating} className="landing-action-button">
                 <Plus size={18} />
                 {creating ? landing.creatingButton : landing.createButton}
               </button>
-            </section>
+            </form>
             )}
 
             {quickStartTab === "student" && (
-            <section className="landing-start-card">
+            <form id="student-start-panel" role="tabpanel" aria-labelledby="student-start-tab" className="landing-start-card" onSubmit={(event) => { event.preventDefault(); joinAsStudent(); }}>
               <div className="landing-start-head">
                 <KeyRound size={32} />
                 <div>
@@ -314,15 +330,16 @@ function LandingPage({ appSettings, roomTitle, setRoomTitle, joinCode, setJoinCo
                   <p>{landing.studentDescription}</p>
                 </div>
               </div>
-              <label>{landing.joinCodeLabel}</label>
-              <input value={joinCode} onChange={(event) => setJoinCode(event.target.value)} placeholder={landing.joinPlaceholder} className="landing-code-input" />
-              <button onClick={joinAsStudent} className="landing-action-button landing-action-dark">
+              <label htmlFor="landing-join-code">{landing.joinCodeLabel}</label>
+              <input id="landing-join-code" autoComplete="off" autoCapitalize="characters" maxLength={6} required value={joinCode} onChange={(event) => setJoinCode(event.target.value)} placeholder={landing.joinPlaceholder} className="landing-code-input" />
+              <button type="submit" disabled={!joinCode.trim()} className="landing-action-button landing-action-dark">
                 {landing.joinButton}
                 <ArrowRight size={18} />
               </button>
-            </section>
+            </form>
             )}
           </div>
+          <p className="landing-start-note"><ShieldCheck size={15} /> 설치 없이, 브라우저에서 바로 시작</p>
         </div>
       </header>
 
@@ -339,7 +356,7 @@ function LandingPage({ appSettings, roomTitle, setRoomTitle, joinCode, setJoinCo
           <div className="landing-value-panel">
             {landing.valueItems.map((item, index) => (
               <article key={item.title}>
-                <span>{index + 1}</span>
+                <span>{String(index + 1).padStart(2, "0")}</span>
                 <strong>{item.title}</strong>
                 <p>{item.description}</p>
               </article>
@@ -358,7 +375,7 @@ function LandingPage({ appSettings, roomTitle, setRoomTitle, joinCode, setJoinCo
             const Icon = featureIcons[index % featureIcons.length];
             return (
               <article key={item.title} className="landing-info-card">
-                <Icon size={26} />
+                <span className="landing-feature-icon"><Icon size={24} strokeWidth={1.7} /></span>
                 <h3>{item.title}</h3>
                 <p>{item.description}</p>
               </article>
@@ -367,24 +384,24 @@ function LandingPage({ appSettings, roomTitle, setRoomTitle, joinCode, setJoinCo
         </div>
       </section>
 
-      <section id="class-flow" className="landing-section landing-process-section" style={{ "--landing-process-image": `url(${processRoadmapImage})` }}>
+      <section id="class-flow" className="landing-section landing-process-section">
         <div className="landing-section-title">
           <p>{landing.processEyebrow}</p>
           <h2>{landing.processTitle}</h2>
           <span>{landing.processDescription}</span>
         </div>
-        <div className="landing-flow-panel">
+        <ol className="landing-flow-panel">
           {landing.flowSteps.map((label, index) => {
             const Icon = flowIcons[index % flowIcons.length];
             return (
-              <button key={`${label}-${index}`} type="button" className="landing-flow-card">
-                <span className="landing-flow-number">{index + 1}</span>
+              <li key={`${label}-${index}`} className="landing-flow-card">
+                <span className="landing-flow-number">{String(index + 1).padStart(2, "0")}</span>
                 <b className="landing-flow-badge"><Icon size={24} /></b>
                 <strong>{label}</strong>
-              </button>
+              </li>
             );
           })}
-        </div>
+        </ol>
       </section>
 
       <section id="cases" className="landing-section landing-muted-section">
@@ -398,7 +415,7 @@ function LandingPage({ appSettings, roomTitle, setRoomTitle, joinCode, setJoinCo
             const Icon = useCaseIcons[index % useCaseIcons.length];
             return (
               <article key={item.title} className="landing-info-card landing-case-card">
-                <Icon size={26} />
+                <span className="landing-feature-icon"><Icon size={24} strokeWidth={1.7} /></span>
                 <h3>{item.title}</h3>
                 <p>{item.description}</p>
                 {item.quote && <blockquote>{item.quote}</blockquote>}
@@ -408,7 +425,7 @@ function LandingPage({ appSettings, roomTitle, setRoomTitle, joinCode, setJoinCo
         </div>
       </section>
 
-      <section id="faq" className="landing-section">
+      <section id="faq" className="landing-section landing-faq-section">
         <div className="landing-section-title">
           <p>{landing.faqEyebrow}</p>
           <h2>{landing.faqTitle}</h2>
@@ -428,7 +445,7 @@ function LandingPage({ appSettings, roomTitle, setRoomTitle, joinCode, setJoinCo
           <h2>{landing.ctaTitle}</h2>
           <p>{landing.ctaDescription}</p>
         </div>
-        <a href="#quick-start" className="landing-primary-button"><Rocket size={18} /> {landing.ctaButton}</a>
+        <a href="#quick-start" className="landing-primary-button">{landing.ctaButton} <ArrowUpRight size={19} /></a>
       </section>
 
       <footer className="landing-footer">
@@ -437,8 +454,8 @@ function LandingPage({ appSettings, roomTitle, setRoomTitle, joinCode, setJoinCo
           <p>{landing.footerTagline}</p>
         </div>
         <div className="landing-contact">
-          <span><Mail size={16} /> {landing.contactEmail}</span>
-          <span><Phone size={16} /> {landing.contactPhone}</span>
+          <a href={`mailto:${landing.contactEmail}`}><Mail size={16} /> {landing.contactEmail}</a>
+          <a href={`tel:${landing.contactPhone}`}><Phone size={16} /> {landing.contactPhone}</a>
         </div>
       </footer>
     </section>
