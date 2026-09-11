@@ -24,15 +24,27 @@ export const DEFAULT_SIMULATION_SETTINGS = {
   factorGradeMultipliers: Object.fromEntries(BUSINESS_FACTORS.map((factor) => [factor.id, { "양호": 1, "보통": 1, "취약": 1 }]))
 };
 
+export function isValidGlobalMultiplier(id, grade, value) {
+  const defense = id === "F17" && grade !== "취약";
+  return Number.isFinite(value) && (defense ? value >= 0.5 && value <= 1 : value >= 1 && value <= 1.5);
+}
+
+export function normalizeGlobalMultipliers(values = {}) {
+  return Object.fromEntries(Object.entries(DEFAULT_SIMULATION_SETTINGS.globalFactorMultipliers).map(([id, grades]) => [id,
+    Object.fromEntries(Object.entries(grades).map(([grade, fallback]) => {
+      const value = values[id]?.[grade];
+      return [grade, isValidGlobalMultiplier(id, grade, value) ? value : fallback];
+    }))
+  ]));
+}
+
 export function mergeSimulationSettings(settings = {}) {
   const incomingScenarios = new Map((settings.pivotScenarios || []).map((scenario) => [scenario.id, scenario]));
   return {
     eventRates: Object.fromEntries(SIMULATION_EVENTS.map((event) => [event.id, {
       ...event.rates, ...(settings.eventRates?.[event.id] || {})
     }])),
-    globalFactorMultipliers: Object.fromEntries(Object.entries(DEFAULT_SIMULATION_SETTINGS.globalFactorMultipliers).map(([id, grades]) => [id, {
-      ...grades, ...(settings.globalFactorMultipliers?.[id] || {})
-    }])),
+    globalFactorMultipliers: normalizeGlobalMultipliers(settings.globalFactorMultipliers),
     pivotScenarios: PIVOT_SCENARIOS.map((scenario) => ({ ...scenario, ...(incomingScenarios.get(scenario.id) || {}) })),
     eventMultipliers: Object.fromEntries(SIMULATION_EVENTS.map((event) => [event.id, {
       ...DEFAULT_SIMULATION_SETTINGS.eventMultipliers[event.id],

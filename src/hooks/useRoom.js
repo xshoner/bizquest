@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
-import { auth, collection, db, doc, onAuthStateChanged, onSnapshot, signInAnonymously } from "../firebase.js";
+import { ensureStudentAuth } from "../lib/studentSession.js";
+import { useEffect, useRef, useState } from "react";
+import { auth, collection, db, doc, onAuthStateChanged, onSnapshot } from "../firebase.js";
 import { withDerivedInvestments } from "../lib/game.js";
 
 export function roomDocRef(ownerUid, roomId) {
@@ -46,6 +47,7 @@ function permissionMessage(err, fallback) {
  */
 export function useRoom(roomId, ownerUid, refreshKey = 0) {
   const [room, setRoom] = useState(null);
+  const subscribedKey = useRef(null);
   const [loading, setLoading] = useState(Boolean(roomId));
   const [error, setError] = useState("");
 
@@ -61,13 +63,13 @@ export function useRoom(roomId, ownerUid, refreshKey = 0) {
       return undefined;
     }
 
-    setLoading(true);
+    const key = `${ownerUid}:${roomId}`;
+    if (subscribedKey.current !== key) { setRoom(null); setLoading(true); }
+    subscribedKey.current = key;
     setError("");
 
     async function ensureAuth() {
-      if (!auth.currentUser) {
-        await signInAnonymously(auth);
-      }
+      await ensureStudentAuth();
     }
 
     ensureAuth().catch((err) => {
@@ -88,12 +90,7 @@ export function useRoom(roomId, ownerUid, refreshKey = 0) {
       stopListeners();
 
       const effectiveOwnerUid = ownerUid || user?.uid;
-      if (!user?.uid || !effectiveOwnerUid) {
-        setRoom(null);
-        setError("방 정보를 확인하는 중입니다.");
-        setLoading(false);
-        return;
-      }
+      if (!user?.uid || !effectiveOwnerUid) return;
 
       let latestRoom = undefined;
       let latestStudents = {};
@@ -122,9 +119,10 @@ export function useRoom(roomId, ownerUid, refreshKey = 0) {
 
       unsubscribeStudents = onSnapshot(
         studentsCollectionRef(effectiveOwnerUid, roomId),
+        { includeMetadataChanges: true },
         (snapshot) => {
           latestStudents = Object.fromEntries(snapshot.docs.map((item) => [item.id, item.data()]));
-          studentsLoaded = true;
+          studentsLoaded = !snapshot.metadata?.fromCache || Boolean(latestStudents[user.uid]);
           publish();
         },
         (err) => {

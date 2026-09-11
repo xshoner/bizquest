@@ -1,4 +1,5 @@
-import { auth, db, doc, getDoc, runTransaction, signInAnonymously } from "../firebase.js";
+import { ensureStudentAuth } from "./studentSession.js";
+import { db, doc, getDoc, runTransaction } from "../firebase.js";
 import { roomDocRef } from "../hooks/useRoom.js";
 
 export async function registerRoomCode(ownerUid, roomId, initialRoom) {
@@ -14,7 +15,7 @@ export async function registerRoomCode(ownerUid, roomId, initialRoom) {
 export async function resolveRoomCode(code) {
   const roomId = String(code || "").trim().toUpperCase();
   if (!/^[A-Z0-9]{6}$/.test(roomId)) throw new Error("영문·숫자 6자리 방 코드를 입력하세요.");
-  if (!auth.currentUser) await signInAnonymously(auth);
+  await ensureStudentAuth();
   const entry = await getDoc(doc(db, "roomCodes", roomId));
   if (!entry.exists()) throw new Error("등록된 방이 없습니다. 코드를 확인하거나 교사의 QR로 입장하세요.");
   const ownerUid = entry.data().ownerUid;

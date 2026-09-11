@@ -1,3 +1,4 @@
+import { applySimulationEventTransaction } from "../lib/simulationTransactions.js";
 import { teamPhaseState } from "../lib/phaseProgress.js";
 import { registerRoomCode } from "../lib/roomDirectory.js";
 ﻿import { useEffect, useMemo, useRef, useState } from "react";
@@ -45,12 +46,13 @@ import {
   Trash2,
   Users
 } from "lucide-react";
-import { collection, db, getCurrentIdToken, getDoc, getDocs, setDoc, updateDoc } from "../firebase.js";
+import { collection, db, getCurrentIdToken, getDoc, getDocs, runTransaction, setDoc, updateDoc } from "../firebase.js";
 import { BUSINESS_FACTORS, STATUSES, STATUS_LABELS } from "../data/gameData.js";
 import {
   SIMULATION_MONTHS,
   TEAM_BASE_ASSET,
-  applyRiskMultiplier,
+  withDerivedInvestments,
+  isValidInvestmentRecord,
   buildResultInsights,
   getPivotScenario,
   makePivotTeamPatch,
@@ -76,7 +78,7 @@ import { PIVOT_SCENARIOS } from "../data/simulationSettings.js";
 import { getEvaluationFactor, isFallbackEvaluation, makeFallbackAiEvaluation } from "../lib/aiEvaluation.js";
 import { deleteRoomDeep, deleteTeamDeep, moveStudent, removeStudentDeep, resetRoomDeep } from "../lib/roomStore.js";
 import { useAppSettings } from "../lib/appSettings.js";
-import { roomDocRef, useRoom } from "../hooks/useRoom.js";
+import { roomDocRef, studentDocRef, studentsCollectionRef, useRoom } from "../hooks/useRoom.js";
 import { loginTeacher, logoutTeacher, registerTeacher, useTeacherAuth } from "../hooks/useTeacherAuth.js";
 import { useAdminBgm } from "../hooks/useAdminBgm.js";
 import bizQuestLogo from "../images/bizquest-logo.png";
@@ -931,6 +933,30 @@ export default function AdminPage() {
     downloadTextFile(`${safeFileName(room?.roomTitle)}_${roomId}_백업.json`, buildRoomJson(room), "application/json");
   }
 
+  const [forceClosing, setForceClosing] = useState(false);
+  async function forceClosePhase() {
+    if (forceClosing) return;
+    setForceClosing(true);
+    try {
+      if (room.status === STATUSES.INVESTMENT) { await runSimulation(0, true); return; }
+      if (room.status !== STATUSES.IDEATION) return;
+      await runTransaction(db, async (transaction) => {
+        const snapshot = await transaction.get(currentRoomRef());
+        if (!snapshot.exists() || snapshot.data().status !== STATUSES.IDEATION) return;
+        const saved = snapshot.data();
+        const patch = { updatedAt: Date.now(), phaseTimer: null, aiEvaluationStatus: "revision", sysMessage: "교사가 현재 저장된 사업계획으로 마감했습니다. AI 평가를 시작합니다." };
+        for (const [key] of activeTeamEntries) {
+          if (!saved.teams[key]) continue;
+          patch[`teams.${key}.idea`] = saved.teams[key].idea || {};
+          patch[`teams.${key}.ideaSubmitted`] = true;
+          patch[`teams.${key}.ideaLocked`] = true;
+        }
+        transaction.update(currentRoomRef(), patch);
+      });
+    } catch (err) { reportActionError(err, "현재 단계 마감에 실패했습니다. 다시 시도해 주세요."); }
+    finally { setForceClosing(false); }
+  }
+
   async function handlePhaseClick(status) {
     if (status === STATUSES.IDEATION && room?.status === STATUSES.AI_EVALUATION) {
       if (evaluating || room?.aiEvaluationStatus === "evaluating") {
@@ -1218,75 +1244,72 @@ export default function AdminPage() {
     }
   }
 
-  async function initializeAssets() {
-    // Field-path writes only: freezes the derived investment totals onto each team and resets the
-    // simulation fields without touching leader-editable fields (name, cards, idea).
-    const teamPatch = {};
-    for (const [key, team] of Object.entries(room.teams || {})) {
-      const investmentsReceived = Number(team.investmentsReceived || 0);
-      const baseAsset = getTeamBaseAsset(team); // includes the C-level diversity bonus
-      const base = baseAsset + investmentsReceived;
-      teamPatch[`teams.${key}.investmentsReceived`] = investmentsReceived;
-      teamPatch[`teams.${key}.baseAsset`] = baseAsset;
-      teamPatch[`teams.${key}.diversity`] = team.diversity ? { key: team.diversity.key, label: team.diversity.label, rate: team.diversity.rate } : null;
-      teamPatch[`teams.${key}.initialCapital`] = base;
-      teamPatch[`teams.${key}.currentAsset`] = base;
-      teamPatch[`teams.${key}.midDecision`] = null;
-      teamPatch[`teams.${key}.lastEventImpact`] = null;
-      teamPatch[`teams.${key}.assetHistory`] = [{ month: 0, asset: base }];
-    }
-    await updateRoom({
-      ...teamPatch,
-      currentMonth: 0,
-      currentEvent: null,
-      currentEventApplied: true,
-      eventHistory: [],
-      currentDecision: null,
-      pivotPhase: null,
-      simulationSettings: appSettings.simulation,
-      aiEvaluationStatus: "done",
-      resultFinalizing: false,
-      resultFinalizeAt: 0,
-      simulationRunning: true,
-      simulationOwner: adminSessionIdRef.current,
-      simulationHeartbeatAt: Date.now(),
-      status: STATUSES.SIMULATION,
-      phaseTimer: null,
-      sysMessage: "AI 경영 시뮬레이션을 시작합니다. 모든 팀은 기본 자산(C레벨 다양성 보너스 반영)에 투자 유치금을 더해 출발합니다."
+  async function initializeAssets(force = false) {
+    const listed = await getDocs(studentsCollectionRef(authState.user.uid, roomId));
+    await runTransaction(db, async (transaction) => {
+      const roomSnapshot = await transaction.get(currentRoomRef());
+      if (!roomSnapshot.exists() || roomSnapshot.data().status !== STATUSES.INVESTMENT) throw new Error("투자 단계에서만 시뮬레이션을 시작할 수 있습니다.");
+      const saved = roomSnapshot.data();
+      const records = { ...(saved.students || {}) };
+      for (const item of listed.docs) {
+        const snapshot = await transaction.get(item.ref);
+        if (snapshot.exists()) records[item.id] = { ...snapshot.data(), uid: item.id };
+      }
+      const accepted = Object.fromEntries(Object.entries(records).map(([uid, student]) => {
+        const candidate = { ...student, investmentSubmitted: true };
+        return [uid, force && isValidInvestmentRecord(candidate, saved.teams) ? candidate : student];
+      }));
+      const active = Object.entries(saved.teams || {}).filter(([key]) => Object.values(records).some((student) => student.team === key));
+      if (!active.length || active.some(([, team]) => !team.aiEvaluation)) throw new Error("모든 팀의 AI 평가를 먼저 완료해 주세요.");
+      const startingTeams = withDerivedInvestments(saved.teams, accepted, STATUSES.INVESTMENT);
+      if (force) for (const [uid, student] of Object.entries(accepted)) {
+        if (student.investmentSubmitted && !records[uid].investmentSubmitted) transaction.set(studentDocRef(authState.user.uid, roomId, uid), student, { merge: true });
+      }
+      // Field-path writes only: freezes the derived investment totals onto each team and resets the
+      // simulation fields without touching leader-editable fields (name, cards, idea).
+      const teamPatch = {};
+      for (const [key, team] of Object.entries(startingTeams)) {
+        const investmentsReceived = Number(team.investmentsReceived || 0);
+        const baseAsset = getTeamBaseAsset(team); // includes the C-level diversity bonus
+        const base = baseAsset + investmentsReceived;
+        teamPatch[`teams.${key}.investmentsReceived`] = investmentsReceived;
+        teamPatch[`teams.${key}.baseAsset`] = baseAsset;
+        teamPatch[`teams.${key}.diversity`] = team.diversity ? { key: team.diversity.key, label: team.diversity.label, rate: team.diversity.rate } : null;
+        teamPatch[`teams.${key}.initialCapital`] = base;
+        teamPatch[`teams.${key}.currentAsset`] = base;
+        teamPatch[`teams.${key}.pivotModifiers`] = null;
+        teamPatch[`teams.${key}.pivotScenarioId`] = null;
+        teamPatch[`teams.${key}.equityDilutionApplied`] = false;
+        teamPatch[`teams.${key}.midDecision`] = null;
+        teamPatch[`teams.${key}.lastEventImpact`] = null;
+        teamPatch[`teams.${key}.assetHistory`] = [{ month: 0, asset: base }];
+      }
+      transaction.update(currentRoomRef(), {
+        ...teamPatch,
+        updatedAt: Date.now(),
+        calculationVersion: 2,
+        currentMonth: 0,
+        currentEvent: null,
+        currentEventApplied: true,
+        eventHistory: [],
+        currentDecision: null,
+        pivotPhase: null,
+        simulationSettings: appSettings.simulation,
+        aiEvaluationStatus: "done",
+        resultFinalizing: false,
+        resultFinalizeAt: 0,
+        simulationRunning: true,
+        simulationOwner: adminSessionIdRef.current,
+        simulationHeartbeatAt: Date.now(),
+        status: STATUSES.SIMULATION,
+        phaseTimer: null,
+        sysMessage: "AI 경영 시뮬레이션을 시작합니다. 모든 팀은 기본 자산(C레벨 다양성 보너스 반영)에 투자 유치금을 더해 출발합니다."
+      });
     });
   }
 
   async function applySimulationEvent(event, month) {
-    const applySnap = await getDoc(currentRoomRef());
-    if (!applySnap.exists()) return;
-    const applyRoom = applySnap.data();
-    if (Number(applyRoom.currentMonth || 0) !== month || applyRoom.currentEvent?.id !== event.id || applyRoom.currentEventApplied) return;
-    const teamPatch = {};
-    for (const [key, team] of Object.entries(applyRoom.teams || {})) {
-      const updated = applyRiskMultiplier(team, event, applyRoom.simulationSettings || appSettings.simulation, month);
-      const history = Array.isArray(team.assetHistory) && team.assetHistory.length > 0
-        ? team.assetHistory
-        : [{ month: 0, asset: getTeamStartingCapital(team) }];
-      teamPatch[`teams.${key}.currentAsset`] = updated.currentAsset;
-      teamPatch[`teams.${key}.lastEventImpact`] = updated.lastEventImpact;
-      teamPatch[`teams.${key}.assetHistory`] = [...history, { month, asset: updated.currentAsset }];
-    }
-    const isPivotStop = month === 12 && applyRoom.pivotPhase !== "applied";
-    if (isPivotStop) {
-      for (const key of Object.keys(applyRoom.teams || {})) {
-        teamPatch[`teams.${key}.midDecision`] = { votes: {}, resolvedScenario: null };
-      }
-    }
-    const keepRunning = Boolean(applyRoom.simulationRunning) && month < SIMULATION_MONTHS && !isPivotStop;
-    await updateRoom({
-      ...teamPatch,
-      currentEventApplied: true,
-      ...(isPivotStop ? { pivotPhase: "voting" } : {}),
-      simulationRunning: keepRunning,
-      simulationOwner: keepRunning ? applyRoom.simulationOwner || adminSessionIdRef.current : null,
-      simulationHeartbeatAt: keepRunning ? Date.now() : 0,
-      sysMessage: month >= SIMULATION_MONTHS ? `${SIMULATION_MONTHS}개월 경영 시뮬레이션이 종료되었습니다. 교사가 최종 결과 버튼을 누르면 결과가 공개됩니다.` : isPivotStop ? "12개월 차가 종료되었습니다. 모든 팀원이 미래를 바꿀 피벗 카드에 투표하세요." : `${month}개월 차 이벤트 자산 변동이 반영되었습니다.`
-    });
+    return applySimulationEventTransaction({ runTransaction, db, ref: currentRoomRef(), event, month, fallbackSettings: appSettings.simulation, owner: adminSessionIdRef.current });
   }
 
   useEffect(() => {
@@ -1371,7 +1394,7 @@ export default function AdminPage() {
    * overlap. `simulationActiveRef` guards against double starts; every timer lives in a ref so a
    * pause or unmount cancels it.
    */
-  async function runSimulation(startMonth = 0) {
+  async function runSimulation(startMonth = 0, force = false) {
     if (!roomId || simulationActiveRef.current) return;
     if (!allTeamsEvaluated) {
       await updateRoom({
@@ -1383,7 +1406,7 @@ export default function AdminPage() {
     setSimulationRunning(true);
     try {
       if (startMonth === 0) {
-        await initializeAssets();
+        await initializeAssets(force);
       } else {
         await updateRoom({
           simulationRunning: true,
@@ -1419,6 +1442,12 @@ export default function AdminPage() {
           return;
         }
 
+        if (freshRoom.currentEvent && freshRoom.currentEventApplied === false) {
+          await applySimulationEvent(freshRoom.currentEvent, Number(freshRoom.currentMonth));
+          simulationTimerRef.current = window.setTimeout(advanceOneMonth, SIMULATION_EVENT_DELAY);
+          return;
+        }
+        if (Number(freshRoom.currentMonth || 0) !== month) { stopLocalSimulation(); return; }
         const event = drawEvent();
         const nextEventHistory = [
           ...(Array.isArray(freshRoom.eventHistory) ? freshRoom.eventHistory : []),
@@ -1429,25 +1458,34 @@ export default function AdminPage() {
         );
         const isPivotMonth = nextMonth === 12 && freshRoom.pivotPhase !== "applied";
         const isLastMonth = nextMonth >= SIMULATION_MONTHS;
-        await updateRoom({
-          ...eventPreviewPatch,
-          currentMonth: nextMonth,
-          currentEvent: event,
-          currentEventApplied: false,
-          eventHistory: nextEventHistory,
-          currentDecision: null,
-          simulationRunning: !isLastMonth && !isPivotMonth,
-          simulationOwner: isLastMonth || isPivotMonth ? null : adminSessionIdRef.current,
-          simulationHeartbeatAt: isLastMonth || isPivotMonth ? 0 : Date.now(),
-          status: STATUSES.SIMULATION,
-          resultFinalizing: false,
-          sysMessage: `${nextMonth}개월 차 이벤트: ${event.title}`
+        const announced = await runTransaction(db, async (transaction) => {
+          const snapshot = await transaction.get(currentRoomRef());
+          if (!snapshot.exists()) return false;
+          const current = snapshot.data();
+          if (!current.simulationRunning || current.simulationOwner !== adminSessionIdRef.current || Number(current.currentMonth || 0) !== month || current.currentEventApplied === false) return false;
+          transaction.update(currentRoomRef(), {
+            updatedAt: Date.now(),
+            ...eventPreviewPatch,
+            currentMonth: nextMonth,
+            currentEvent: event,
+            currentEventApplied: false,
+            eventHistory: nextEventHistory,
+            currentDecision: null,
+            simulationRunning: !isLastMonth && !isPivotMonth,
+            simulationOwner: isLastMonth || isPivotMonth ? null : adminSessionIdRef.current,
+            simulationHeartbeatAt: isLastMonth || isPivotMonth ? 0 : Date.now(),
+            status: STATUSES.SIMULATION,
+            resultFinalizing: false,
+            sysMessage: `${nextMonth}개월 차 이벤트: ${event.title}`
+          });
+          return true;
         });
+        if (!announced) { stopLocalSimulation(); return; }
         month = nextMonth;
 
         applyTimerRef.current = window.setTimeout(() => {
           applyTimerRef.current = null;
-          applySimulationEvent(event, nextMonth).catch(() => {});
+          applySimulationEvent(event, nextMonth).catch((err) => reportActionError(err, "이벤트 적용에 실패했습니다. 다시 진행하면 재시도합니다."));
         }, SIMULATION_EVENT_APPLY_DELAY);
 
         if (isLastMonth || isPivotMonth) {
@@ -1459,7 +1497,7 @@ export default function AdminPage() {
             if (isLastMonth) {
               // Keep the final event visible until its asset impact is durably applied.
               // Calling this again is safe because applySimulationEvent is idempotent.
-              await applySimulationEvent(event, nextMonth).catch(() => {});
+              await applySimulationEvent(event, nextMonth).catch((err) => reportActionError(err, "이벤트 적용에 실패했습니다. 다시 진행하면 재시도합니다."));
               const completedSnap = await getDoc(currentRoomRef()).catch(() => null);
               const completedRoom = completedSnap?.exists() ? completedSnap.data() : null;
               if (completedRoom?.currentEventApplied === true) {
@@ -1646,7 +1684,10 @@ export default function AdminPage() {
       )}
       <PhaseRail currentStatus={room.status} onPhaseClick={handlePhaseClick} />
       <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
-        <div><PhaseProgressPanel room={room} teams={teams} students={students} onSelectStudent={(uid) => setStudentMenu({ uid, mode: "assigned" })} onSelectTeam={(key) => { document.dispatchEvent(new CustomEvent("bizquest:focus-team", { detail: key })); }} />
+        <div>{[STATUSES.IDEATION, STATUSES.INVESTMENT].includes(room.status) && <div className="mb-3 rounded-xl bg-amber-50 p-3">
+          <button type="button" disabled={forceClosing || evaluating} onClick={forceClosePhase} className="touch-button w-full rounded-lg bg-amber-600 px-4 py-3 font-black text-white disabled:opacity-50">{forceClosing ? "마감 중…" : "현재 입력으로 마감하고 다음 단계"}</button>
+          <p className="mt-2 text-xs text-amber-900">서버에 저장된 초안을 포함해 마감합니다. 미입력 사업계획은 빈 내용으로 평가하고, 미투자 금액은 현금으로 남습니다.</p>
+        </div>}<PhaseProgressPanel room={room} teams={teams} students={students} onSelectStudent={(uid) => setStudentMenu({ uid, mode: "assigned" })} onSelectTeam={(key) => { document.dispatchEvent(new CustomEvent("bizquest:focus-team", { detail: key })); }} />
         {room.status === STATUSES.AI_EVALUATION && activeTeamEntries.some(([, team]) => !team.aiEvaluation || isFallbackEvaluation(team.aiEvaluation)) && <button className="admin-ui-button" disabled={evaluating || room.aiEvaluationStatus === "evaluating"} onClick={() => evaluateBusinessPlans(true)}>미평가·대체평가 팀만 다시 평가</button>}
         </div><PhaseTimerControl timer={room.phaseTimer} onStart={(minutes) => setPhaseTimer(minutes)} onExtend={() => setPhaseTimer(1, { extend: true })} onStop={() => setPhaseTimer(null)} />
       </div>
@@ -1736,16 +1777,18 @@ function getStudentOrigin(localNetworkHost) {
   return origin;
 }
 
-function getTeamGradientStyle(teamKey) {
-  const seed = [...String(teamKey || "team")].reduce((total, character) => total + character.charCodeAt(0) * 17, 0);
-  const hue = seed % 360;
-  return {
-    "--team-gradient": `linear-gradient(135deg, hsl(${hue} 58% 39%), hsl(${hue} 62% 55%))`,
-    "--team-glow": `hsl(${hue} 54% 42% / 0.2)`
-  };
+const TEAM_PALETTE = [
+  ["#5369d4", "#7797e8"], ["#248d86", "#62bda9"], ["#b9587b", "#df8e9d"],
+  ["#9463be", "#b995d4"], ["#bc7344", "#dfa16c"], ["#3d86b5", "#7db8d3"],
+  ["#777e43", "#adb66c"], ["#a76191", "#d898bd"]
+];
+function getTeamGradientStyle(teamKey, offset = 0, index = 0) {
+  const colors = TEAM_PALETTE[(offset + index) % TEAM_PALETTE.length];
+  return { "--team-gradient": `linear-gradient(120deg, ${colors[0]}, ${colors[1]})`, "--team-glow": `${colors[0]}25` };
 }
 
 function TeamGrid({ roomStatus, teams, students, onOpenStudentMenu, onRenameTeam, onAddTeam, onDeleteTeam, onLockPlan, onOpenPlan, onOpenOpinion }) {
+  const [paletteOffset] = useState(() => Math.floor(Math.random() * TEAM_PALETTE.length));
   const [filter, setFilter] = useState("all");
   const [focusedTeam, setFocusedTeam] = useState(null);
   useEffect(() => { setFilter("all"); setFocusedTeam(null); }, [roomStatus]);
@@ -1774,7 +1817,7 @@ function TeamGrid({ roomStatus, teams, students, onOpenStudentMenu, onRenameTeam
           const phase = teamPhaseState(roomStatus, team, members);
           if ((filter === "pending" && phase.done) || (filter === "awaiting" && !phase.awaiting)) return null;
           return (
-            <section id={`team-${key}`} key={key} className={`${focusedTeam === key ? "team-focused" : ""} admin-team-card admin-team-tone-${teamIndex % 6}`} style={getTeamGradientStyle(key)}>
+            <section id={`team-${key}`} key={key} className={`${focusedTeam === key ? "team-focused" : ""} admin-team-card admin-team-tone-${teamIndex % 6}`} style={getTeamGradientStyle(key, paletteOffset, Object.keys(teams).sort().indexOf(key))}>
               <div className="admin-team-identity">
                 <div className="admin-team-main-row">
                   <div className="admin-team-avatar-column">

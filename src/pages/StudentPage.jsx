@@ -1,9 +1,10 @@
+import { ensureStudentAuth, rememberStudent } from "../lib/studentSession.js";
 import { resolveRoomCode } from "../lib/roomDirectory.js";
 import { readPlanDraft, restorePlanDraft, usePlanAutosave } from "../hooks/usePlanAutosave.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { Award, Check, Crown, Lightbulb, Pencil, RotateCcw, Send } from "lucide-react";
-import { auth, onAuthStateChanged, setDoc, signInAnonymously } from "../firebase.js";
+import { auth, db, onAuthStateChanged, runTransaction } from "../firebase.js";
 import {
   C_LEVEL_KEYS,
   C_LEVEL_ROLES,
@@ -23,7 +24,7 @@ import { formatWon, getTeamBaseAsset, makeStudent, normalizeTeamName } from "../
 import { studentDocRef, useRoom } from "../hooks/useRoom.js";
 import { updateOwnStudent, updateOwnTeam } from "../lib/roomStore.js";
 import { getTechCardImage, getTrendCardImage } from "../lib/assets.js";
-import { PhaseTimerDisplay } from "../components/shared/PhaseTimer.jsx";
+import { PhaseTimerDisplay, StudentTimerAlert } from "../components/shared/PhaseTimer.jsx";
 import { AiEvaluationShowcase, ResultFinalizingShowcase, ResultFireworks } from "../components/shared/Effects.jsx";
 import { MascotAvatar } from "../components/shared/MascotAvatar.jsx";
 import { installAudioUnlock, playPhaseTransition } from "../lib/audio.js";
@@ -105,11 +106,7 @@ export default function StudentPage() {
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (user?.uid) {
-        setAuthUid(user.uid);
-        localStorage.setItem(`startupHero:${roomId}:uid`, user.uid);
-        localStorage.setItem("startupHero:lastRoomId", roomId);
-      }
+      setAuthUid(user?.uid || "");
       setAuthReady(true);
     });
     return () => unsubscribe();
@@ -117,7 +114,10 @@ export default function StudentPage() {
 
   const student = authUid ? room?.students?.[authUid] : null;
 
+  useEffect(() => { if (student) rememberStudent(ownerUid, roomId, student); }, [ownerUid, roomId, student?.uid, student?.nickname]);
+
   async function joinRoom() {
+    if (joining) return;
     const trimmed = nickname.trim();
     if (!trimmed) return;
     if (trimmed.length > 20) {
@@ -127,13 +127,18 @@ export default function StudentPage() {
     setJoining(true);
     setJoinError("");
     try {
-      const credential = auth.currentUser ? { user: auth.currentUser } : await signInAnonymously(auth);
-      const nextUid = credential.user.uid;
-      // Each student owns exactly one document; the room document is never touched from here.
-      await setDoc(studentDocRef(ownerUid, roomId, nextUid), makeStudent(nextUid, trimmed), { merge: true });
+      const user = await ensureStudentAuth();
+      const nextUid = user.uid;
+      const ref = studentDocRef(ownerUid, roomId, nextUid);
+      await runTransaction(db, async (transaction) => {
+        const existing = await transaction.get(ref);
+        if (existing.exists()) return; // Re-entry must never reset team, diagnosis, or investments.
+        if (Object.values(room.students || {}).some((entry) => entry.nickname?.trim() === trimmed)) {
+          throw new Error("이미 참여 중인 닉네임입니다. 처음 참여한 브라우저에서 QR을 다시 열어주세요. 다른 브라우저라면 교사에게 기존 참여 복구를 요청하세요.");
+        }
+        transaction.set(ref, makeStudent(nextUid, trimmed));
+      });
       setAuthUid(nextUid);
-      localStorage.setItem(`startupHero:${roomId}:uid`, nextUid);
-      localStorage.setItem("startupHero:lastRoomId", roomId);
     } catch (err) {
       setJoinError(writeErrorMessage(err, "입장하지 못했습니다. 네트워크를 확인하고 다시 시도하세요."));
     } finally {
@@ -178,6 +183,7 @@ export default function StudentPage() {
   return (
     <MobileFrame>
       <PhaseTransition status={room.status} />
+      <StudentTimerAlert timer={room.phaseTimer?.phase === room.status ? room.phaseTimer : null} />
       {room.resultFinalizing && <ResultFinalizingShowcase variant="phase" />}
       <ResultFireworks status={room.status} />
       <StudentHeader room={room} uid={authUid} student={student} />
@@ -188,7 +194,7 @@ export default function StudentPage() {
       {room.status === STATUSES.IDEATION && <Ideation key={`${room.roomId}:${student.team}:${authUid}`} room={room} uid={authUid} student={student} />}
       {room.status === STATUSES.AI_EVALUATION && <AiEvaluation room={room} student={student} />}
       {[STATUSES.INVESTMENT, STATUSES.SIMULATION, STATUSES.RESULT].includes(room.status) && <TeamFundingSummary room={room} student={student} />}
-      {room.status === STATUSES.INVESTMENT && <InvestmentStage room={room} uid={authUid} student={student} />}
+      {room.status === STATUSES.INVESTMENT && <InvestmentStage key={`${room.ownerUid}:${room.roomId}:${room.createdAt}:${authUid}:${student.team}`} room={room} uid={authUid} student={student} />}
       {room.status === STATUSES.SIMULATION && <SimulationStage room={room} student={student} />}
       {room.status === STATUSES.SIMULATION && ["voting", "ready"].includes(room.pivotPhase) && <PivotVoteStage room={room} uid={authUid} student={student} />}
       {room.status === STATUSES.RESULT && <StudentResult room={room} student={student} />}

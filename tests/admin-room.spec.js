@@ -7,7 +7,11 @@ test.beforeEach(async ({ page }) => {
     export const getDoc = async (ref) => ref.includes?.('roomCodes') ? ({ exists: () => ref.at(-1) !== 'ZZZZZZ', data: () => ({ ownerUid: 'teacher-test' }) }) : ref.includes?.('rooms') ? ({ exists: () => true, data: () => ({ status: 'WAITING' }) }) : ref.includes?.('platformAdmins') ? ({ exists: () => true, data: () => ({ enabled: window.adminAllowed !== false }) }) : ref.includes?.('appSettings') ? ({ exists: () => true, data: () => JSON.parse(localStorage.getItem('test-server-settings') || '{}') }) : ({ exists: () => false }), getDocs = async () => ({ docs: [] });
     export const onAuthStateChanged = (_auth, fn) => { fn(auth.currentUser); return () => {}; };
     export const onSnapshot = () => () => {};
-    export const runTransaction = async () => {};
+    export const runTransaction = async (_db, callback) => callback({
+      get: async (ref) => ref.includes('students') ? ({ exists: () => !!window.roomFixture?.students?.[ref.at(-1)], data: () => window.roomFixture.students[ref.at(-1)] }) : ({ exists: () => true, data: () => window.roomFixture || { status: 'WAITING', teams: {} } }),
+      set: (ref, patch) => { window.transactionSets ||= []; window.transactionSets.push({ ref, patch }); },
+      update: (ref, patch) => { window.roomUpdates ||= []; window.roomUpdates.push(patch); }
+    });
     export const updateDoc = async (_ref, patch) => { window.roomUpdates ||= []; window.roomUpdates.push(patch); }, setDoc = async (_ref, payload) => { if (window.failSettingsSave) throw new Error('서버 저장 실패'); window.savedSettings = payload; localStorage.setItem('test-server-settings', JSON.stringify(payload)); }, deleteDoc = updateDoc, getCurrentIdToken = updateDoc,
       browserLocalPersistence = {}, createUserWithEmailAndPassword = updateDoc, deleteField = updateDoc,
       setPersistence = updateDoc, signInAnonymously = updateDoc, signInWithEmailAndPassword = updateDoc,
@@ -23,7 +27,7 @@ test.beforeEach(async ({ page }) => {
     import { makeInitialRoom } from '/src/lib/game.js';
     const room = { ...makeInitialRoom('ABC123', '방 입장 회귀 테스트'), ownerUid: 'teacher-test', students: {}, ...window.roomFixture };
     export const useRoom = () => ({ room, loading: false, error: '' });
-    export const roomDocRef = (owner, id) => ['rooms', owner, id], studentDocRef = roomDocRef, studentsCollectionRef = roomDocRef;
+    export const roomDocRef = (owner, id) => ['rooms', owner, id], studentDocRef = (owner, id, uid) => ["rooms", owner, id, "students", uid], studentsCollectionRef = roomDocRef;
   ` }));
 });
 
@@ -52,22 +56,22 @@ test("관리자 설정에 코드 기본값을 표시하고 수정·저장·복�
   await expect(page.getByLabel("E01 취약 기본 변동률")).toHaveValue("-12");
   await expect(page.getByLabel("E01 상승 배율")).toHaveValue("1");
   await expect(page.getByLabel("F01 양호 배율")).toHaveValue("1");
-  for (const [label, value] of [["F16 양호 배율", "1.05"], ["F16 보통 배율", "1.015"], ["F16 취약 배율", "1.035"], ["F17 양호 배율", "0.95"], ["F17 보통 배율", "0.975"], ["F17 취약 배율", "1.037"]]) {
+  for (const [label, value] of [["F16 양호 효과 (%)", "5"], ["F16 보통 효과 (%)", "1.5"], ["F16 취약 효과 (%)", "3.5"], ["F17 양호 효과 (%)", "5"], ["F17 보통 효과 (%)", "2.5"], ["F17 취약 효과 (%)", "3.7"]]) {
     await expect(page.getByLabel(label)).toHaveValue(value);
   }
   await page.getByLabel("E01 보통 기본 변동률").fill("-8");
   await page.getByLabel("E01 상승 배율").fill("0");
-  await page.getByLabel("F16 보통 배율").fill("1.2");
+  await page.getByLabel("F16 보통 효과 (%)").fill("20");
   await page.getByRole("button", { name: "설정 저장", exact: true }).click();
   await expect.poll(() => page.evaluate(() => window.savedSettings?.simulation.globalFactorMultipliers.F16.보통)).toBe(1.2);
   expect(await page.evaluate(() => window.savedSettings.simulation.eventRates.E01.보통)).toBe(-8);
   expect(await page.evaluate(() => window.savedSettings.simulation.eventMultipliers.E01.positive)).toBe(0);
   await page.reload();
-  await expect(page.getByLabel("F16 보통 배율")).toHaveValue("1.2");
+  await expect(page.getByLabel("F16 보통 효과 (%)")).toHaveValue("20");
   await page.getByRole("button", { name: "이벤트 코드 기본값으로 복원" }).click();
   await page.getByRole("button", { name: "팩터 코드 기본값으로 복원" }).click();
   await expect(page.getByLabel("E01 보통 기본 변동률")).toHaveValue("-5");
-  await expect(page.getByLabel("F16 보통 배율")).toHaveValue("1.015");
+  await expect(page.getByLabel("F16 보통 효과 (%)")).toHaveValue("1.5");
   await page.locator(".settings-panel").filter({ has: page.getByRole("heading", { name: "이벤트 카드 ± 배율", exact: true }) }).screenshot({ path: "test-results/event-settings.png" });
   await page.locator(".settings-panel").filter({ has: page.getByRole("heading", { name: "AI 평가 팩터별 등급 배율", exact: true }) }).screenshot({ path: "test-results/factor-settings.png" });
   expect(errors).toEqual([]);
@@ -96,9 +100,9 @@ test("관리자 설정에 코드 기본값을 표시하고 수정·저장·복�
 
  test("서버 설정 저장 실패는 캐시를 바꾸지 않고 재시도할 수 있다", async ({ page }) => {
   await page.goto("/settings.html");
-  await expect(page.getByLabel("F16 양호 배율")).toHaveValue("1.05");
+  await expect(page.getByLabel("F16 양호 효과 (%)")).toHaveValue("5");
   const before = await page.evaluate(() => localStorage.getItem("bizquest-app-settings-cache"));
-  await page.getByLabel("F16 양호 배율").fill("1.2");
+  await page.getByLabel("F16 양호 효과 (%)").fill("20");
   await page.evaluate(() => { window.failSettingsSave = true; });
   await page.getByRole("button", { name: "설정 저장", exact: true }).click();
   await expect(page.getByText("서버 저장 실패", { exact: true })).toBeVisible();
@@ -123,7 +127,7 @@ test("관리자 설정에 코드 기본값을 표시하고 수정·저장·복�
 });
 
  test("렌더링 오류에도 재입장 경로를 제공한다", async ({ page }) => {
-  await page.route("**/src/hooks/useRoom.js", (route) => route.fulfill({ contentType: "text/javascript", body: `export const useRoom = () => { throw new Error('test render failure'); }; export const roomDocRef = () => ({}), studentDocRef = roomDocRef, studentsCollectionRef = roomDocRef;` }));
+  await page.route("**/src/hooks/useRoom.js", (route) => route.fulfill({ contentType: "text/javascript", body: `export const useRoom = () => { throw new Error('test render failure'); }; export const roomDocRef = () => ({}), studentDocRef = (owner, id, uid) => ["rooms", owner, id, "students", uid], studentsCollectionRef = roomDocRef;` }));
   await page.goto("/admin/ABC123");
   await expect(page.getByRole("alert")).toContainText("화면을 불러오지 못했습니다");
   await expect(page.getByRole("button", { name: "다시 시도" })).toBeVisible();
@@ -178,4 +182,38 @@ test("관리자 설정에 코드 기본값을 표시하고 수정·저장·복�
   await page.getByRole('button', { name: '미평가·대체평가 팀만 다시 평가' }).click();
   await expect.poll(() => requests).toEqual(['B', 'C']);
   await expect.poll(() => page.evaluate(() => window.roomUpdates?.at(-1)?.aiEvaluationStatus)).toBe('done');
+});
+
+test("교사 강제 사업계획 마감은 저장된 초안과 빈 계획을 확정한다", async ({ page }) => {
+  await page.addInitScript(() => {
+    window.roomFixture = { status: 'IDEATION', teams: { A: { teamName: '초안 팀', idea: { serviceName: '미제출 초안' }, ideaSubmitted: false }, B: { teamName: '빈 팀', idea: null } }, students: { a: {uid:'a',team:'A'}, b:{uid:'b',team:'B'} } };
+  });
+  await page.goto('/admin/ABC123');
+  await page.getByRole('button', {name:'현재 입력으로 마감하고 다음 단계'}).click();
+  await expect.poll(() => page.evaluate(() => window.roomUpdates?.at(-1)?.aiEvaluationStatus)).toBe('revision');
+  const patch = await page.evaluate(() => window.roomUpdates.at(-1));
+  expect(patch['teams.A.idea']).toEqual({ serviceName:'미제출 초안' });
+  expect(patch['teams.B.idea']).toEqual({});
+  expect(patch['teams.A.ideaLocked']).toBe(true);
+  expect(patch['teams.B.ideaSubmitted']).toBe(true);
+});
+
+test("교사 강제 투자 마감은 미확정 초안을 합산하고 출발 자산을 한 번 고정한다", async ({ page }) => {
+  await page.addInitScript(() => {
+    window.roomFixture = {status:'INVESTMENT',teams:{A:{teamName:'가',aiEvaluation:{factors:{}},initialCapital:100000000},B:{teamName:'나',aiEvaluation:{factors:{}},initialCapital:100000000}},students:{a:{uid:'a',team:'A',investments:{B:12000000},investmentSubmitted:false},b:{uid:'b',team:'B',investments:{},investmentSubmitted:false}}};
+  });
+  await page.goto('/admin/ABC123');
+  await page.getByRole('button',{name:'현재 입력으로 마감하고 다음 단계'}).click();
+  await expect.poll(() => page.evaluate(() => window.roomUpdates?.find(p=>p.status==='SIMULATION')?.['teams.B.initialCapital'])).toBe(112000000);
+  expect(await page.evaluate(() => window.transactionSets.find(s=>s.patch.uid==='a').patch.investmentSubmitted)).toBe(true);
+  expect(await page.evaluate(() => window.roomUpdates.find(p=>p.status==='SIMULATION')['teams.B.pivotModifiers'])).toBeNull();
+});
+
+test("같은 닉네임을 재등록하려 하면 기존 학생을 덮어쓰지 않는다", async ({ page }) => {
+  await page.addInitScript(() => { window.roomFixture={status:'INVESTMENT',teams:{A:{teamName:'가'}},students:{old:{uid:'old',nickname:'기존학생',team:'A',cLevelResult:{key:'CEO'}}}}; });
+  await page.goto('/room/ABC123?owner=teacher-test');
+  await page.getByPlaceholder('예: 김창업').fill('기존학생');
+  await page.getByRole('button',{name:'입장',exact:true}).click();
+  await expect(page.getByRole('alert')).toContainText('이미 참여 중인 닉네임');
+  expect(await page.evaluate(()=>window.transactionSets?.length || 0)).toBe(0);
 });

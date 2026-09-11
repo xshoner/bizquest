@@ -5459,3 +5459,8 @@ select {
 .admin-team-card .admin-team-avatar-column { width: 54px; }
 .admin-team-card .mascot-avatar { max-width: 50px; max-height: 50px; }
 @media print { .team-filter, .team-detail-toggle { display: none; } }
+/* Alerts remain visible without intercepting student activity. */
+.student-timer-alert { position: fixed; inset: 0; z-index: 10000; display: grid; place-items: center; pointer-events: none; }
+.student-timer-alert strong { color: rgb(239 36 57 / .42); font-size: clamp(100px, 30vw, 240px); font-weight: 950; text-shadow: 0 2px 20px rgb(255 255 255 / .4); }
+.investment-modal { position: fixed; inset: 0; z-index: 9500; display: flex; align-items: center; justify-content: center; background: rgb(15 23 42 / .5); padding: 16px; }
+.investment-modal-panel { width: min(100%, 600px); max-height: 85dvh; overflow: auto; border-radius: 20px; background: white; padding: 20px; overscroll-behavior: contain; }

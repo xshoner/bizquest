@@ -114,3 +114,26 @@ test("새 팩터는 팀별로 적용되며 피벗 배율과 청산을 유지한�
     assert.equal(applyRiskMultiplier(downsized, event, {}, 13).lastEventImpact.rate, 0);
   }
 });
+
+ test("수업 오류의 5배·2.5배·역방향 전역 배율은 기본 효과로 복구한다", () => {
+  const settings = mergeSimulationSettings({eventRates:{E21:{양호:32}},globalFactorMultipliers:{F16:{양호:5,보통:2.5,취약:0.75},F17:{양호:3.5,보통:1.07,취약:0.78}}});
+  assert.deepEqual(settings.globalFactorMultipliers, mergeSimulationSettings().globalFactorMultipliers);
+  const team = {...baseTeam,aiEvaluation:{factors:{F09:{grade:'양호'},F16:{grade:'양호'}}}};
+  const updated = applyRiskMultiplier(team,{id:'E21',factor:'F09',rates:{양호:32}},settings,5);
+  assert.equal(updated.lastEventImpact.rate,33.6);
+ });
+
+ test("기본 자산 필드가 없어도 고정된 최초 자본을 수익률 분모로 사용한다", () => {
+   assert.equal(getAssetChange({initialCapital:200000000,currentAsset:300000000}).rate,50);
+   const portfolio=calculateInvestmentPortfolio({team:'A',investmentSubmitted:true,investments:{B:25000000}},{B:{initialCapital:200000000,currentAsset:300000000}});
+   assert.equal(portfolio.rate,25);
+ });
+
+ test("100% 초과 손실과 피벗 비용으로 음수 자산·부호 반전이 생기지 않는다", () => {
+   const team={...baseTeam,currentAsset:1000000};
+   assert.equal(makePivotTeamPatch(team,PIVOT_SCENARIOS.find(s=>s.id==='downsizing')).currentAsset,0);
+   const event={id:'CUSTOM',factor:'F01',rates:{보통:-200}};
+   const failed=applyRiskMultiplier(team,event,{},1);
+   assert.equal(failed.currentAsset,0);
+   assert.equal(applyRiskMultiplier(failed,event,{},2).currentAsset,0);
+ });

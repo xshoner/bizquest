@@ -161,7 +161,7 @@ export function buildResultInsights(teams = {}) {
     return direction === "max" ? delta || rankOf(a) - rankOf(b) : -delta || rankOf(a) - rankOf(b);
   })[0];
   const monthlyWins = Object.fromEntries(ranked.map((team) => [team.key, 0]));
-  for (let month = 1; month <= 12; month += 1) {
+  for (let month = 1; month <= SIMULATION_MONTHS; month += 1) {
     const leader = bestBy((team) => {
       const points = Array.isArray(team.assetHistory) ? team.assetHistory.filter((point) => Number(point.month) <= month) : [];
       return Number(points[points.length - 1]?.asset ?? getTeamStartingCapital(team));
@@ -170,7 +170,7 @@ export function buildResultInsights(teams = {}) {
   }
   const diversityTeams = ranked.filter((team) => team.diversity);
   const leaders = [
-    { icon: "👑", label: "12개월 동안 가장 오래 1위를 달린 팀", team: bestBy((team) => monthlyWins[team.key]) },
+    { icon: "👑", label: "24개월 동안 가장 오래 1위를 달린 팀", team: bestBy((team) => monthlyWins[team.key]) },
     { icon: "✅", label: "전 항목에서 가장 많은 ‘양호’를 받은 팀", team: bestBy((team) => countAiGrades(team).양호) },
     { icon: "⚠️", label: "전 항목에서 가장 많은 ‘취약’을 받은 팀", team: bestBy((team) => countAiGrades(team).취약) },
     { icon: "🌈", label: "팀원 다양성이 가장 우수한 팀", team: diversityTeams.length ? bestBy((team) => team.diversity?.rate || 0, "max", diversityTeams) : ranked[0] },
@@ -256,7 +256,7 @@ export function getTeamBaseAsset(team) {
 /** Starting capital = base asset (with diversity bonus) + investments received. */
 export function getTeamStartingCapital(team) {
   const initial = Number(team?.initialCapital);
-  if (Number.isFinite(initial) && initial > 0 && team?.baseAsset) return initial;
+  if (Number.isFinite(initial) && initial > 0) return initial;
   return getTeamBaseAsset(team) + Number(team?.investmentsReceived || 0);
 }
 
@@ -336,7 +336,7 @@ export function makePivotTeamPatch(team, scenario, month = 12) {
   const beforeAsset = Number(team.currentAsset || 0);
   const immediateAmount = Number(scenario?.immediateAmount || 0);
   const immediateRate = Number(scenario?.immediateRate || 0);
-  const afterAsset = Math.round(beforeAsset * (1 + immediateRate / 100) + immediateAmount);
+  const afterAsset = Math.max(0, Math.round(beforeAsset * (1 + immediateRate / 100) + immediateAmount));
   const modifiers = { scenarioId: scenario?.id, appliedAtMonth: month };
   if (scenario?.id === "government_support") modifiers.factorMultipliers = { F09: Number(scenario.primaryMultiplier ?? 1) };
   if (scenario?.id === "professional_management") modifiers.equityDilutionRate = Number(scenario.dilutionRate || 0);
@@ -387,9 +387,11 @@ export function applyRiskMultiplier(team, event, simulationSettings = {}, month 
     const extraLoss = (feasibility === "취약" ? globalMultiplier("F16", feasibility) - 1 : 0) + globalMultiplier("F17", duplication) - 1;
     rate *= Math.max(0, 1 + extraLoss);
   }
-  rate = Math.round(rate * 100) / 100 || 0;
+  if (!Number.isFinite(rate)) throw new Error("이벤트 변동률 설정이 유효하지 않습니다.");
+  rate = Math.max(-100, Math.round(rate * 100) / 100) || 0;
   const beforeAsset = Number(team.currentAsset || 0);
-  const afterAsset = Math.round(beforeAsset * (1 + rate / 100));
+  const afterAsset = Math.max(0, Math.round(beforeAsset * (1 + rate / 100)));
+  if (!Number.isSafeInteger(afterAsset)) throw new Error("시뮬레이션 자산이 안전한 계산 범위를 초과했습니다. 배율 설정을 확인하세요.");
 
   return {
     ...team,

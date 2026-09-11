@@ -19,9 +19,17 @@ export function PhaseTimerDisplay({ timer, compact = false }) {
       <span className="phase-timer-icon">{expired ? <TimerReset size={compact ? 16 : 20} /> : <Hourglass size={compact ? 16 : 20} />}</span>
       <span className="phase-timer-body">
         <b>{expired ? "시간 종료" : formatCountdown(remaining)}</b>
-        {!compact && <small>{expired ? "선생님의 다음 안내를 기다리세요" : "남은 시간"}</small>}
+        {!compact && <small>{expired ? "알림 종료 · 활동은 계속할 수 있어요" : "남은 시간"}</small>}
       </span>
       <i className="phase-timer-bar" aria-hidden="true"><b style={{ width: `${progress}%` }} /></i>
     </div>
   );
+}
+
+export function StudentTimerAlert({ timer }) {
+  const remaining = useCountdown(timer?.endsAt);
+  const seconds = remaining === null ? null : Math.ceil(remaining / 1000);
+  const label = seconds <= 60 && seconds >= 58 ? "1분" : seconds <= 20 && seconds >= 18 ? "20초" : seconds >= 1 && seconds <= 5 ? String(seconds) : null;
+  if (!timer?.endsAt || !label) return null;
+  return <div className="student-timer-alert" role="status" aria-live="assertive" aria-atomic="true"><strong key={label}>{label}</strong></div>;
 }
